@@ -1,0 +1,1003 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>PB DataWindow Analyzer & Editor Pro</title>
+    <style>
+        :root {
+            --primary: #0056b3;
+            --success: #28a745;
+            --danger: #dc3545;
+            --bg-color: #f4f7f6;
+            --border-color: #dee2e6;
+        }
+        body {
+            font-family: 'Malgun Gothic', 'Apple SD Gothic Neo', sans-serif;
+            background-color: var(--bg-color);
+            margin: 0; padding: 20px; color: #333;
+        }
+        body.is-dragging, body.is-dragging * { cursor: grabbing !important; user-select: none; }
+        body.is-resizing, body.is-resizing * { user-select: none; }
+
+        .container {
+            max-width: 1400px; margin: 0 auto; background: #fff;
+            padding: 20px 30px; border-radius: 8px; box-shadow: 0 4px 12px rgba(0,0,0,0.1);
+        }
+        h1 { text-align: center; color: var(--primary); border-bottom: 2px solid #b8daff; padding-bottom: 10px; }
+        .input-group { margin-bottom: 20px; }
+        textarea {
+            width: 100%; height: 200px; padding: 10px; font-family: Consolas, monospace;
+            font-size: 13px; border: 1px solid var(--border-color); border-radius: 4px;
+            resize: vertical; background-color: #fafafa; box-sizing: border-box;
+        }
+        .btn-group { display: flex; gap: 10px; margin-bottom: 20px; }
+        button {
+            padding: 10px 20px; font-size: 15px; border: none; border-radius: 4px;
+            cursor: pointer; font-weight: bold; transition: opacity 0.2s;
+        }
+        button:hover { opacity: 0.8; }
+        .btn-primary { background-color: var(--primary); color: white; }
+        .btn-success { background-color: var(--success); color: white; }
+        .btn-secondary { background-color: #6c757d; color: white; }
+        .btn-danger { background-color: var(--danger); color: white; padding: 5px 10px; font-size: 12px; }
+        
+        #results { display: none; margin-top: 30px; }
+        .result-card { border: 1px solid var(--border-color); border-radius: 6px; margin-bottom: 20px; overflow: hidden; }
+        .result-header {
+            background-color: #e9ecef; padding: 10px 15px; font-weight: bold;
+            font-size: 1.1em; color: #495057; border-bottom: 1px solid var(--border-color);
+            display: flex; justify-content: space-between; align-items: center;
+        }
+        .result-body { padding: 15px; overflow-x: auto; }
+        .result-body.no-padding { padding: 0; }
+        
+        table { width: 100%; border-collapse: collapse; min-width: 900px; }
+        th, td { border: 1px solid var(--border-color); padding: 6px 10px; text-align: left; font-size: 13px; vertical-align: middle; }
+        th { background-color: #f8f9fa; }
+        
+        select, input[type="text"], input[type="number"] {
+            padding: 4px; border: 1px solid #ccc; border-radius: 4px;
+            font-family: inherit; font-size: 12px; background-color: #fff; box-sizing: border-box;
+        }
+        input[type="number"] { width: 50px; text-align: center; margin-right: 5px; }
+        .coord-group { display: flex; flex-wrap: wrap; gap: 5px; align-items: center; }
+        .coord-label { color: #555; font-weight: bold; font-size: 11px; }
+
+        .badge {
+            padding: 3px 8px; border-radius: 12px; font-size: 12px; font-weight: bold; color: #ffffff !important;
+            display: inline-block; text-align: center; min-width: 50px;
+            background-color: #6c757d;
+        }
+        .badge-type { background-color: #6c757d; }
+        .badge-id { background-color: #ffc107; color: #212529 !important; }
+        .badge-column { background-color: #28a745; }
+        .badge-text { background-color: #17a2b8; }
+        .badge-compute { background-color: #6f42c1; }
+        .badge-line { background-color: #fd7e14; }
+        
+        .ext-desc { margin-top: 4px; font-size: 12px; padding: 3px 6px; border-radius: 3px; background-color: #f8f9fa; display: inline-block; border: 1px solid #e9ecef; }
+        
+        #dwPreviewContainer {
+            background-color: #e9ecef; border: 2px solid #adb5bd; border-radius: 4px;
+            padding: 10px; overflow-x: auto; position: relative; user-select: none;
+            transition: background-color 0.3s;
+        }
+        .pb-band { position: relative; width: 100%; border-bottom: 2px dashed #adb5bd; margin-bottom: 2px; min-width: 800px; }
+        .pb-band-label { position: absolute; left: 5px; top: 5px; font-size: 11px; font-weight: bold; color: #adb5bd; pointer-events: none; z-index: 0; }
+        
+        .pb-control {
+            position: absolute; box-sizing: border-box; font-size: 11px; 
+            display: flex; align-items: center; justify-content: center;
+            overflow: hidden; white-space: nowrap; padding: 2px 4px;
+            cursor: grab; z-index: 10;
+        }
+        
+        .pb-control.selected { outline: 1.5px dashed #007bff; z-index: 100 !important; box-shadow: 0 0 8px rgba(0,123,255,0.4) !important; }
+        
+        .name-label {
+            position: absolute; top: -22px; left: 0; background-color: #007bff;
+            color: #fff; font-weight: bold; padding: 2px 6px; border-radius: 4px; font-size: 11px;
+            display: none; z-index: 1000; pointer-events: none; box-shadow: 0 2px 4px rgba(0,0,0,0.2);
+            white-space: nowrap;
+        }
+        .pb-control.selected .name-label { display: block; }
+        
+        .pb-control:hover { z-index: 2000 !important; overflow: visible !important; }
+        .pb-control:not(.type-line):hover > span {
+            background-color: rgba(255, 255, 255, 0.95); color: #000 !important;
+            padding: 2px 6px; border-radius: 3px; box-shadow: 1px 1px 4px rgba(0,0,0,0.3);
+            display: inline-block; white-space: nowrap;
+        }
+        
+        .type-line { background-color: transparent !important; border: none !important; box-shadow: none !important; overflow: visible !important; }
+        .type-line:hover { background-color: transparent !important; outline: none; box-shadow: none !important; }
+        .type-line svg { pointer-events: auto; }
+        .line-hitbox { stroke: transparent; stroke-width: 12px; cursor: grab; } 
+        
+        .line-handle { fill: #ffffff; stroke: #007bff; stroke-width: 2px; cursor: crosshair; display: none; pointer-events: auto; }
+        .pb-control.selected .line-handle { display: block; }
+        .line-handle:hover { fill: #007bff; r: 6px; }
+
+        .resize-handle {
+            position: absolute; width: 8px; height: 8px; background: #fff; border: 1px solid #007bff;
+            display: none; pointer-events: auto; z-index: 101;
+        }
+        .pb-control.selected .resize-handle { display: block; }
+        .resize-handle.nw { top: -4px; left: -4px; cursor: nwse-resize; }
+        .resize-handle.ne { top: -4px; right: -4px; cursor: nesw-resize; }
+        .resize-handle.sw { bottom: -4px; left: -4px; cursor: nesw-resize; }
+        .resize-handle.se { bottom: -4px; right: -4px; cursor: nwse-resize; }
+
+        .preview-edit .pb-control:not(.type-line) { border: 1px solid #999; box-shadow: 1px 1px 2px rgba(0,0,0,0.1); }
+        .preview-edit .type-text { background-color: #f8f9fa; border-color: #ced4da; color: #495057; }
+        .preview-edit .type-column { background-color: #d1e7dd; border-color: #0f5132; color: #0f5132; font-weight: bold; }
+        .preview-edit .type-compute { background-color: #f8d7da; border-color: #842029; color: #842029; font-style: italic; }
+        
+        .preview-pb { background-color: #fff !important; }
+        .preview-pb .pb-band { border-bottom: 1px solid #ddd; }
+        .preview-pb .pb-band-label { display: none; }
+        .preview-pb .pb-control:not(.type-line) {
+            background-color: var(--pb-bg, transparent); color: var(--pb-color, #000);
+            border: var(--pb-border, none); box-shadow: none; justify-content: flex-start;
+        }
+        
+        .toggle-switch { display: flex; align-items: center; gap: 8px; cursor: pointer; font-size: 13px; color: #333; font-weight: normal; }
+        .toggle-switch input { width: 16px; height: 16px; cursor: pointer; }
+        .shortcut-tip { font-size: 12px; color: #17a2b8; background: #e0f3f8; padding: 3px 8px; border-radius: 4px; font-weight: bold; margin-left: 10px; }
+    </style>
+</head>
+<body>
+
+<div class="container">
+    <h1>PB DW Analyzer & Editor Pro 🛠️</h1>
+    <p>누락되었던 핵심 렌더링 함수들을 완벽하게 복구했습니다. (SQL `~"` 강제 삽입 로직도 완전 제거)</p>
+    
+    <div class="input-group">
+        <textarea id="dwSource" placeholder="여기에 원본 SRD 소스 코드를 붙여넣으세요..."></textarea>
+    </div>
+    
+    <div class="btn-group">
+        <button class="btn-primary" onclick="analyzeDW()">📥 1. 원본 소스 가져오기 (전체 초기화)</button>
+        <button class="btn-secondary" onclick="document.getElementById('dwSource').value=''; document.getElementById('results').style.display='none';">지우기</button>
+    </div>
+
+    <div id="results">
+        <div class="result-card">
+            <div class="result-header">🗄️ SQL / Retrieve Statement (자동 동기화 됨)</div>
+            <div class="result-body">
+                <p style="margin-top:0; font-size:12px; color:#d9534f; font-weight:bold;">
+                    ※ '1. DB 컬럼' 목록을 수정하면 아래 쿼리에 실시간으로 반영됩니다! 
+                </p>
+                <!-- oninput으로 사용자가 직접 편집할때 템플릿 갱신하도록 함 -->
+                <textarea id="sqlEditor" style="width: 100%; height: 150px; font-family: Consolas, monospace; font-size: 13px; padding: 10px; border: 1px solid var(--border-color); border-radius: 4px; background-color: #272822; color: #f8f8f2;" oninput="updateSqlTemplateFromEditor()"></textarea>
+            </div>
+        </div>
+
+        <div class="result-card">
+            <div class="result-header">📊 1. DB 컬럼 (Table Definition)</div>
+            <div class="result-body no-padding">
+                <table id="tblColumns">
+                    <thead>
+                        <tr>
+                            <th width="80">Index(ID)</th>
+                            <th width="300">DB Column 명 (dbname - 수정가능)</th>
+                            <th width="250">DW Column 명 (name - 수정가능)</th>
+                            <th>데이터 타입 (type)</th>
+                            <th width="60">관리</th>
+                        </tr>
+                    </thead>
+                    <tbody></tbody>
+                </table>
+            </div>
+        </div>
+
+        <div class="result-card">
+            <div class="result-header">
+                <div style="display: flex; align-items: center; flex-wrap: wrap; gap: 8px;">
+                    <span>🖼️ 2. 화면 UI 미리보기 (Drag & Arrow Keys)</span>
+                    <span class="shortcut-tip">⌨️ 방향키(이동)</span>
+                    <span class="shortcut-tip">⌨️ Shift+방향키(크기조절)</span>
+                    <span class="shortcut-tip">⌨️ Ctrl+Z(취소)</span>
+                </div>
+                <label class="toggle-switch">
+                    <input type="checkbox" id="modeToggle" onchange="togglePreviewMode()">
+                    실제 화면처럼 보기 (PB Mode)
+                </label>
+            </div>
+            <div class="result-body">
+                <div id="dwPreviewContainer" class="preview-edit"></div>
+            </div>
+        </div>
+
+        <div class="result-card">
+            <div class="result-header">
+                <span>🎨 3. 화면 UI 매칭 & 속성 에디터</span>
+                <button class="btn-success" onclick="generateModifiedSRD()" style="font-size: 15px; padding: 8px 20px; box-shadow: 0 4px 6px rgba(40,167,69,0.3);">💾 2. 변경사항 적용 및 최종 코드 생성</button>
+            </div>
+            <div class="result-body no-padding">
+                <table id="tblUiControls">
+                    <thead>
+                        <tr>
+                            <th width="50">ID</th>
+                            <th width="70">타입</th>
+                            <th width="250">컨트롤 명 (name - 수정가능)</th>
+                            <th width="200">DB 컬럼 매칭</th>
+                            <th width="280">좌표 / 크기 (수정시 실시간 반영)</th>
+                            <th width="50">관리</th>
+                        </tr>
+                    </thead>
+                    <tbody></tbody>
+                </table>
+            </div>
+        </div>
+
+        <div class="result-card" id="cardModified" style="display: none; border-color: var(--success);">
+            <div class="result-header" style="background-color: #d4edda; color: #155724; border-bottom-color: #c3e6cb;">
+                ✅ 최종 생성된 SRD 코드 (복사해서 사용하세요)
+            </div>
+            <div class="result-body">
+                <textarea id="modifiedSrdOutput" style="height: 300px; background-color: #fff; font-size: 12px;"></textarea>
+            </div>
+        </div>
+    </div>
+</div>
+
+<script>
+    let dbColumnsList = [];
+    let uiControlsList = [];
+    let bandHeights = { header: 0, detail: 0, summary: 0, footer: 0 };
+    let lastAnalyzedSrc = ""; 
+    let sqlStartIndex = -1;
+    let sqlEndIndex = -1;
+    
+    // 💡 쿼리를 안전하게 매핑할 토큰 템플릿
+    let sqlTemplate = ""; 
+
+    const scale = 0.25; 
+    let selectedIdx = -1;
+    let undoHistory = [];
+    let tempDragState = null;
+    let isArrowMoving = false; 
+
+    function pbColorToHex(pbColorStr) {
+        let c = parseInt(pbColorStr);
+        if (isNaN(c)) return 'transparent';
+        if (c === 33554432) return '#000000'; 
+        if (c === 536870912) return 'transparent'; 
+        if (c === 67108864) return '#f0f0f0'; 
+        if (c === 1073741824) return '#ffffff'; 
+        if (c >= 16777216) return '#000000'; 
+        let r = c % 256; let g = Math.floor(c / 256) % 256; let b = Math.floor(c / 65536) % 256;
+        return `rgb(${r},${g},${b})`;
+    }
+
+    // 💡 SQL 블록 탐색기 (이스케이프 ~" 무시)
+    function findPBStringEnd(src, startIdx) {
+        let inString = false;
+        for (let i = startIdx; i < src.length; i++) {
+            if (src[i] === '~' && src[i+1] === '"') { i++; continue; }
+            if (src[i] === '"') {
+                if (!inString) { inString = true; } else { return i; }
+            }
+        }
+        return -1;
+    }
+
+    function findBlockEnd(src, startIdx) {
+        let open = 0; let inString = false; let stringChar = '';
+        for (let i = startIdx; i < src.length; i++) {
+            if (src[i] === '~' && (src[i+1] === '"' || src[i+1] === "'")) { i++; continue; }
+            if (!inString && (src[i] === '"' || src[i] === "'")) {
+                inString = true; stringChar = src[i];
+            } else if (inString && src[i] === stringChar) {
+                inString = false;
+            }
+            if (!inString) {
+                if (src[i] === '(') open++;
+                else if (src[i] === ')') { open--; if (open === 0) return i; }
+            }
+        }
+        return -1;
+    }
+
+    function getAttr(str, attrName) {
+        const safeAttr = attrName.replace('.', '\\.');
+        const regex = new RegExp(`(?:^|[\\s(])${safeAttr}\\s*=\\s*(?:"((?:~"|[^"])*)"|([^\\s)]+))`, 'i');
+        const m = str.match(regex);
+        return m ? (m[1] || m[2] || '') : '';
+    }
+
+    function parseUiControls(src) {
+        const keywords = ['text', 'column', 'compute', 'line', 'rectangle', 'ellipse', 'roundrectangle', 'bitmap', 'report', 'groupbox'];
+        const startRegex = new RegExp(`(?:^|\\n)\\s*(${keywords.join('|')})\\s*\\(`, 'gi');
+        let results = []; let match;
+        while ((match = startRegex.exec(src)) !== null) {
+            const keyword = match[1];
+            const keywordIdx = match.index + match[0].toLowerCase().indexOf(keyword.toLowerCase());
+            let braceStart = keywordIdx + keyword.length;
+            while(src[braceStart] !== '(' && braceStart < src.length) braceStart++;
+            let endIdx = findBlockEnd(src, braceStart);
+            if (endIdx !== -1) {
+                startRegex.lastIndex = endIdx + 1;
+                results.push({
+                    startIndex: match.index, endIndex: endIdx + 1,        
+                    type: keyword.toLowerCase(), fullMatch: src.substring(match.index, endIdx + 1),
+                    attr: src.substring(braceStart + 1, endIdx)
+                });
+            }
+        }
+        return results;
+    }
+
+    // 💡 [복구된 핵심 함수들 시작]
+    function getCoordsSnapshot() {
+        return uiControlsList.map(ui => ({
+            x: ui.x, y: ui.y, width: ui.width, height: ui.height,
+            x1: ui.x1, y1: ui.y1, x2: ui.x2, y2: ui.y2
+        }));
+    }
+
+    function commitStateToHistory(snapshot) {
+        undoHistory.push(snapshot);
+        if(undoHistory.length > 50) undoHistory.shift();
+    }
+
+    function startInputEdit() { tempDragState = getCoordsSnapshot(); }
+    function commitInputEdit() { 
+        if(tempDragState) { commitStateToHistory(tempDragState); tempDragState = null; }
+    }
+
+    function updateCoord(idx, prop, val) {
+        uiControlsList[idx][prop] = parseInt(val) || 0;
+        renderPreview(); 
+    }
+    
+    function updateUiName(idx, val) {
+        uiControlsList[idx].name = val;
+        renderPreview(); 
+    }
+    // 💡 [복구된 핵심 함수들 끝]
+
+    // 💡 [개선] DB 컬럼 입력 시 템플릿을 통한 SQL 재조립
+    function updateDbNameAndSQL(idx, field, inputElement) {
+        let db = dbColumnsList[idx];
+        db[field] = inputElement.value; // 변경된 이름 반영
+        renderSqlFromTemplate(); // 템플릿 기반으로 쿼리 재조립 (절대 안엉킴)
+    }
+
+    // 💡 템플릿의 `__DBCOL_uid__` 토큰들을 현재 DB 컬럼 이름들로 치환
+    function renderSqlFromTemplate() {
+        let currentSql = sqlTemplate;
+
+        dbColumnsList.forEach(db => {
+            let tokenRegex = new RegExp(`__DBCOL_${db.uid}__`, 'g');
+            if (db.isDeleted) {
+                currentSql = currentSql.replace(tokenRegex, '____DEL____');
+            } else {
+                let baseName = db.dbname.split('.').pop() || db.dbname;
+                currentSql = currentSql.replace(tokenRegex, baseName);
+            }
+        });
+
+        // 삭제 마커(____DEL____) 깔끔하게 정리
+        currentSql = currentSql.replace(/[a-zA-Z0-9_가-힣]+\.\_\_\_\_DEL\_\_\_\_\s*,\s*/g, ''); 
+        currentSql = currentSql.replace(/,\s*[a-zA-Z0-9_가-힣]+\.\_\_\_\_DEL\_\_\_\_/g, '');
+        currentSql = currentSql.replace(/\_\_\_\_DEL\_\_\_\_\s*,\s*/g, '');
+        currentSql = currentSql.replace(/,\s*\_\_\_\_DEL\_\_\_\_/g, '');
+        currentSql = currentSql.replace(/\b\_\_\_\_DEL\_\_\_\_\b/g, ''); 
+        currentSql = currentSql.replace(/,\s*(?=\bFROM\b)/gi, '\n    ');
+
+        document.getElementById('sqlEditor').value = currentSql;
+    }
+
+    // 💡 사용자가 직접 SQL 창 편집 시 템플릿 역기록
+    function updateSqlTemplateFromEditor() {
+        let currentSql = document.getElementById('sqlEditor').value;
+        let sortedCols = [...dbColumnsList].sort((a,b) => {
+            let aName = (a.dbname.split('.').pop() || a.dbname).length;
+            let bName = (b.dbname.split('.').pop() || b.dbname).length;
+            return bName - aName;
+        });
+
+        sortedCols.forEach(db => {
+            if(db.isDeleted) return;
+            let baseName = db.dbname.split('.').pop() || db.dbname;
+            if(!baseName) return;
+            const safeBase = baseName.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+            const regex = new RegExp(`(^|[^a-zA-Z0-9_가-힣])(${safeBase})(?=[^a-zA-Z0-9_가-힣]|$)`, 'gi');
+            currentSql = currentSql.replace(regex, `$1__DBCOL_${db.uid}__`);
+        });
+        sqlTemplate = currentSql;
+    }
+
+    function reindexDbColumns() {
+        let newId = 1;
+        let idMap = {};
+        dbColumnsList.forEach(db => {
+            if (!db.isDeleted) {
+                idMap[db.index] = newId; 
+                db.index = newId;
+                newId++;
+            }
+        });
+        uiControlsList.forEach(ui => {
+            if (ui.type === 'column' && ui.selectedDbId !== null) {
+                if (idMap[ui.selectedDbId]) {
+                    ui.selectedDbId = idMap[ui.selectedDbId];
+                    ui.id = ui.selectedDbId;
+                } else {
+                    ui.selectedDbId = null;
+                    ui.id = null;
+                }
+            }
+        });
+    }
+
+    function togglePreviewMode() {
+        const container = document.getElementById('dwPreviewContainer');
+        if (document.getElementById('modeToggle').checked) {
+            container.classList.remove('preview-edit');
+            container.classList.add('preview-pb');
+        } else {
+            container.classList.remove('preview-pb');
+            container.classList.add('preview-edit');
+        }
+    }
+
+    function renderTables() {
+        const tbodyCols = document.querySelector('#tblColumns tbody');
+        tbodyCols.innerHTML = '';
+        dbColumnsList.forEach((col, arrayIndex) => {
+            if (col.isDeleted) return;
+            tbodyCols.innerHTML += `<tr>
+                <td style="text-align:center;"><span class="badge badge-id">id=${col.index}</span></td>
+                <td><input type="text" value="${col.dbname}" style="width:100%;" oninput="updateDbNameAndSQL(${arrayIndex}, 'dbname', this)"></td>
+                <td><input type="text" value="${col.name}" style="width:100%; font-weight:bold; color:#0056b3;" oninput="updateDbNameAndSQL(${arrayIndex}, 'name', this)"></td>
+                <td><span class="badge badge-type">${col.type}</span></td>
+                <td style="text-align:center;"><button class="btn-danger" onclick="deleteDb(${arrayIndex})">삭제</button></td>
+            </tr>`;
+        });
+
+        const tbodyUI = document.querySelector('#tblUiControls tbody');
+        tbodyUI.innerHTML = '';
+        uiControlsList.forEach((ui, arrayIndex) => {
+            if (ui.isDeleted) return;
+            const displayId = ui.selectedDbId !== undefined ? ui.selectedDbId : ui.id;
+            const idDisplay = displayId !== null ? `<span class="badge badge-id">${displayId}</span>` : '-';
+            
+            let extraDesc = '';
+            if (ui.checkboxText) extraDesc = `<br><span class="ext-desc">☑️ Checkbox: <b>${ui.checkboxText}</b></span>`;
+            else if (ui.type === 'compute' && ui.content) extraDesc = `<br><span class="ext-desc">🧮 Expr: ${ui.content.substring(0,30)}...</span>`;
+            else if (ui.type === 'text' && ui.content) extraDesc = `<br><span class="ext-desc">📝 Text: ${ui.content.substring(0,30)}...</span>`;
+
+            let matchControl = '';
+            if (ui.type === 'column') {
+                let options = `<option value="">-- DB 컬럼 선택 안함 --</option>`;
+                dbColumnsList.forEach(db => {
+                    if(db.isDeleted) return; 
+                    const selected = (db.index === displayId) ? 'selected' : '';
+                    options += `<option value="${db.index}" ${selected}>[id=${db.index}] ${db.dbname}</option>`;
+                });
+                matchControl = `<select id="ui_sel_${arrayIndex}" style="width:100%;" onchange="uiControlsList[${arrayIndex}].selectedDbId = this.value ? parseInt(this.value) : null">${options}</select>`;
+            }
+
+            let coordPanel = '';
+            if (ui.type === 'line') {
+                coordPanel = `
+                    <div class="coord-group">
+                        <span class="coord-label">X1:</span> <input type="number" id="ui_inp_${arrayIndex}_x1" value="${ui.x1}" onfocus="startInputEdit()" onchange="commitInputEdit()" oninput="updateCoord(${arrayIndex}, 'x1', this.value)">
+                        <span class="coord-label">Y1:</span> <input type="number" id="ui_inp_${arrayIndex}_y1" value="${ui.y1}" onfocus="startInputEdit()" onchange="commitInputEdit()" oninput="updateCoord(${arrayIndex}, 'y1', this.value)"><br>
+                        <span class="coord-label">X2:</span> <input type="number" id="ui_inp_${arrayIndex}_x2" value="${ui.x2}" onfocus="startInputEdit()" onchange="commitInputEdit()" oninput="updateCoord(${arrayIndex}, 'x2', this.value)">
+                        <span class="coord-label">Y2:</span> <input type="number" id="ui_inp_${arrayIndex}_y2" value="${ui.y2}" onfocus="startInputEdit()" onchange="commitInputEdit()" oninput="updateCoord(${arrayIndex}, 'y2', this.value)">
+                    </div>
+                `;
+            } else {
+                coordPanel = `
+                    <div class="coord-group">
+                        <span class="coord-label">X:</span> <input type="number" id="ui_inp_${arrayIndex}_x" value="${ui.x}" onfocus="startInputEdit()" onchange="commitInputEdit()" oninput="updateCoord(${arrayIndex}, 'x', this.value)">
+                        <span class="coord-label">Y:</span> <input type="number" id="ui_inp_${arrayIndex}_y" value="${ui.y}" onfocus="startInputEdit()" onchange="commitInputEdit()" oninput="updateCoord(${arrayIndex}, 'y', this.value)"><br>
+                        <span class="coord-label">W:</span> <input type="number" id="ui_inp_${arrayIndex}_width" value="${ui.width}" onfocus="startInputEdit()" onchange="commitInputEdit()" oninput="updateCoord(${arrayIndex}, 'width', this.value)">
+                        <span class="coord-label">H:</span> <input type="number" id="ui_inp_${arrayIndex}_height" value="${ui.height}" onfocus="startInputEdit()" onchange="commitInputEdit()" oninput="updateCoord(${arrayIndex}, 'height', this.value)">
+                    </div>
+                `;
+            }
+
+            tbodyUI.innerHTML += `<tr>
+                <td style="text-align:center;">${idDisplay}</td>
+                <td style="text-align:center;"><span class="badge badge-${ui.type}">${ui.type.toUpperCase()}</span></td>
+                <td><input type="text" id="ui_inp_${arrayIndex}_name" value="${ui.name}" style="width:100%; font-weight:bold; color:#0056b3;" oninput="updateUiName(${arrayIndex}, this.value)">${extraDesc}</td>
+                <td>${matchControl}</td>
+                <td>${coordPanel}</td>
+                <td style="text-align:center;"><button class="btn-danger" onclick="deleteUi(${arrayIndex})">삭제</button></td>
+            </tr>`;
+        });
+
+        renderPreview();
+    }
+
+    function renderPreview() {
+        const container = document.getElementById('dwPreviewContainer');
+        container.innerHTML = ''; 
+        
+        const bandElements = {};
+        ['header', 'detail', 'summary', 'footer'].forEach(band => {
+            if (bandHeights[band] !== undefined) {
+                let hPx = Math.max(bandHeights[band] * scale, 30); 
+                const bandDiv = document.createElement('div');
+                bandDiv.className = 'pb-band';
+                bandDiv.style.height = `${hPx}px`;
+                bandDiv.style.backgroundColor = (band === 'detail') ? '#ffffff' : '#f8f9fa';
+                bandDiv.innerHTML = `<div class="pb-band-label">${band.toUpperCase()}</div>`;
+                container.appendChild(bandDiv);
+                bandElements[band] = bandDiv;
+            }
+        });
+
+        uiControlsList.forEach((ui, idx) => {
+            if (ui.isDeleted) return;
+
+            const bandName = ui.band || 'detail';
+            const parentBand = bandElements[bandName] || bandElements['detail']; 
+
+            if (parentBand) {
+                const el = document.createElement('div');
+                const selClass = (idx === selectedIdx) ? 'selected' : '';
+                el.className = `pb-control type-${ui.type} ${selClass}`;
+                el.dataset.idx = idx; 
+                
+                el.style.setProperty('--pb-bg', pbColorToHex(ui.pbBgColor));
+                el.style.setProperty('--pb-color', pbColorToHex(ui.pbColor));
+                const hasBorder = (ui.pbBorder !== "0" && ui.pbBorder !== "");
+                el.style.setProperty('--pb-border', hasBorder ? '1px solid #777' : 'none');
+
+                if(ui.fontFace) el.style.fontFamily = ui.fontFace;
+                if(ui.fontWeight) el.style.fontWeight = ui.fontWeight;
+                if(ui.fontHeight) {
+                    let fSizePx = Math.abs(parseInt(ui.fontHeight)) * 1.33 * scale;
+                    el.style.fontSize = `${Math.max(fSizePx, 9)}px`; 
+                }
+
+                const nameLabelHtml = `<div class="name-label">${ui.name}</div>`;
+
+                if (ui.type === 'line') {
+                    let minX = Math.min(ui.x1, ui.x2) * scale; let minY = Math.min(ui.y1, ui.y2) * scale;
+                    let realW = Math.abs(ui.x1 - ui.x2) * scale; let realH = Math.abs(ui.y1 - ui.y2) * scale;
+                    
+                    let boxW = realW; let boxH = realH; let offsetX = 0; let offsetY = 0;
+                    if (realW < 2) { boxW = 8; offsetX = 4; }
+                    if (realH < 2) { boxH = 8; offsetY = 4; }
+                    
+                    el.style.left = `${minX - offsetX}px`; el.style.top = `${minY - offsetY}px`;
+                    el.style.width = `${boxW}px`; el.style.height = `${boxH}px`;
+                    
+                    let svgX1 = (ui.x1 <= ui.x2) ? offsetX : realW + offsetX;
+                    let svgY1 = (ui.y1 <= ui.y2) ? offsetY : realH + offsetY;
+                    let svgX2 = (ui.x1 <= ui.x2) ? realW + offsetX : offsetX;
+                    let svgY2 = (ui.y1 <= ui.y2) ? realH + offsetY : offsetY;
+
+                    let pColor = pbColorToHex(ui.penColor || "33554432");
+                    let pWidth = Math.max(1, (parseInt(ui.penWidth) || 1) * scale); 
+
+                    el.innerHTML = `
+                        ${nameLabelHtml}
+                        <svg width="100%" height="100%" style="overflow:visible; position:absolute; top:0; left:0;">
+                            <line class="line-hitbox" x1="${svgX1}" y1="${svgY1}" x2="${svgX2}" y2="${svgY2}" />
+                            <line x1="${svgX1}" y1="${svgY1}" x2="${svgX2}" y2="${svgY2}" stroke="${pColor}" stroke-width="${pWidth}"/>
+                            <circle class="line-handle" cx="${svgX1}" cy="${svgY1}" r="4" data-handle="1" />
+                            <circle class="line-handle" cx="${svgX2}" cy="${svgY2}" r="4" data-handle="2" />
+                        </svg>`;
+                } else {
+                    el.style.left = `${ui.x * scale}px`; el.style.top = `${ui.y * scale}px`;
+                    el.style.width = `${ui.width * scale}px`; el.style.height = `${ui.height * scale}px`;
+                    
+                    let innerText = ui.name;
+                    if (ui.type === 'text') innerText = ui.content || ui.name;
+                    else if (ui.type === 'column') innerText = ui.checkboxText ? `☑ ${ui.checkboxText}` : `[ ${ui.name} ]`;
+                    else if (ui.type === 'compute') innerText = ui.name;
+                    
+                    el.innerHTML = `
+                        ${nameLabelHtml}
+                        <span>${innerText}</span>
+                        <div class="resize-handle nw" data-resize="nw"></div>
+                        <div class="resize-handle ne" data-resize="ne"></div>
+                        <div class="resize-handle sw" data-resize="sw"></div>
+                        <div class="resize-handle se" data-resize="se"></div>
+                    `;
+                }
+                parentBand.appendChild(el);
+            }
+        });
+    }
+
+    let isDragging = false;
+    let dragMode = null; 
+    let dragTargetIdx = -1;
+    let hasMoved = false;
+    let startX, startY, origX, origY, origX2, origY2, origW, origH;
+
+    document.addEventListener('mousedown', e => {
+        let handle = e.target.closest('.line-handle');
+        let resizeHandle = e.target.closest('.resize-handle');
+        let target = e.target.closest('.pb-control');
+        
+        if (!target && !handle && !resizeHandle) {
+            if (selectedIdx !== -1) { selectedIdx = -1; renderPreview(); }
+            return;
+        }
+
+        tempDragState = getCoordsSnapshot();
+        hasMoved = false; isDragging = true;
+        
+        if (handle) {
+            dragMode = 'handle' + handle.dataset.handle;
+            target = handle.closest('.pb-control');
+            document.body.classList.add('is-dragging');
+        } else if (resizeHandle) {
+            dragMode = 'resize-' + resizeHandle.dataset.resize;
+            target = resizeHandle.closest('.pb-control');
+            document.body.classList.add('is-resizing');
+        } else {
+            dragMode = 'move';
+            document.body.classList.add('is-dragging');
+        }
+
+        let idx = parseInt(target.dataset.idx);
+        dragTargetIdx = idx;
+        
+        if (selectedIdx !== idx) { selectedIdx = idx; renderPreview(); }
+        
+        let ui = uiControlsList[idx];
+        startX = e.clientX; startY = e.clientY;
+        
+        if (ui.type === 'line') {
+            origX = ui.x1; origY = ui.y1; origX2 = ui.x2; origY2 = ui.y2;
+        } else {
+            origX = ui.x; origY = ui.y; origW = ui.width; origH = ui.height;
+        }
+    });
+
+    document.addEventListener('mousemove', e => {
+        if (!isDragging || dragTargetIdx === -1) return;
+        hasMoved = true;
+        
+        let deltaX = Math.round((e.clientX - startX) / scale);
+        let deltaY = Math.round((e.clientY - startY) / scale);
+        let ui = uiControlsList[dragTargetIdx];
+        
+        if (ui.type === 'line') {
+            if (dragMode === 'handle1') { ui.x1 = origX + deltaX; ui.y1 = origY + deltaY; }
+            else if (dragMode === 'handle2') { ui.x2 = origX2 + deltaX; ui.y2 = origY2 + deltaY; }
+            else { ui.x1 = origX + deltaX; ui.y1 = origY + deltaY; ui.x2 = origX2 + deltaX; ui.y2 = origY2 + deltaY; }
+        } else {
+            if (dragMode === 'move') {
+                ui.x = origX + deltaX; ui.y = origY + deltaY;
+            } else if (dragMode.startsWith('resize-')) {
+                let dType = dragMode.split('-')[1];
+                if (dType === 'se') {
+                    ui.width = Math.max(10, origW + deltaX); ui.height = Math.max(10, origH + deltaY);
+                } else if (dType === 'nw') {
+                    ui.x = origX + deltaX; ui.y = origY + deltaY;
+                    ui.width = Math.max(10, origW - deltaX); ui.height = Math.max(10, origH - deltaY);
+                } else if (dType === 'ne') {
+                    ui.y = origY + deltaY;
+                    ui.width = Math.max(10, origW + deltaX); ui.height = Math.max(10, origH - deltaY);
+                } else if (dType === 'sw') {
+                    ui.x = origX + deltaX;
+                    ui.width = Math.max(10, origW - deltaX); ui.height = Math.max(10, origH + deltaY);
+                }
+            }
+        }
+        renderPreview();
+    });
+
+    function syncTableInputsFromUI(idx) {
+        let ui = uiControlsList[idx];
+        if(ui.type === 'line') {
+            if(document.getElementById(`ui_inp_${idx}_x1`)) document.getElementById(`ui_inp_${idx}_x1`).value = ui.x1;
+            if(document.getElementById(`ui_inp_${idx}_y1`)) document.getElementById(`ui_inp_${idx}_y1`).value = ui.y1;
+            if(document.getElementById(`ui_inp_${idx}_x2`)) document.getElementById(`ui_inp_${idx}_x2`).value = ui.x2;
+            if(document.getElementById(`ui_inp_${idx}_y2`)) document.getElementById(`ui_inp_${idx}_y2`).value = ui.y2;
+        } else {
+            if(document.getElementById(`ui_inp_${idx}_x`)) document.getElementById(`ui_inp_${idx}_x`).value = ui.x;
+            if(document.getElementById(`ui_inp_${idx}_y`)) document.getElementById(`ui_inp_${idx}_y`).value = ui.y;
+            if(document.getElementById(`ui_inp_${idx}_width`)) document.getElementById(`ui_inp_${idx}_width`).value = ui.width;
+            if(document.getElementById(`ui_inp_${idx}_height`)) document.getElementById(`ui_inp_${idx}_height`).value = ui.height;
+        }
+    }
+
+    document.addEventListener('mouseup', e => {
+        if (isDragging) {
+            isDragging = false;
+            document.body.classList.remove('is-dragging', 'is-resizing');
+            if (hasMoved && tempDragState) commitStateToHistory(tempDragState);
+            tempDragState = null;
+            if (dragTargetIdx !== -1) syncTableInputsFromUI(dragTargetIdx);
+            dragTargetIdx = -1; dragMode = null;
+        }
+    });
+
+    document.addEventListener('keydown', e => {
+        if(e.target.tagName === 'INPUT' || e.target.tagName === 'TEXTAREA' || e.target.tagName === 'SELECT') return;
+
+        if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === 'z') {
+            e.preventDefault();
+            if (undoHistory.length === 0) return;
+            let lastState = undoHistory.pop();
+            uiControlsList.forEach((ui, i) => {
+                if (lastState[i]) {
+                    Object.assign(ui, lastState[i]);
+                    syncTableInputsFromUI(i); 
+                }
+            });
+            renderPreview();
+            return;
+        }
+
+        if (selectedIdx !== -1) {
+            const keys = ['ArrowUp', 'ArrowDown', 'ArrowLeft', 'ArrowRight'];
+            if (keys.includes(e.key)) {
+                e.preventDefault(); 
+                if (!e.repeat) {
+                    tempDragState = getCoordsSnapshot();
+                    isArrowMoving = true;
+                }
+                let ui = uiControlsList[selectedIdx];
+                let step = 4; 
+                if (e.shiftKey) {
+                    if (ui.type === 'line') {
+                        if (e.key === 'ArrowUp') ui.y2 -= step;
+                        if (e.key === 'ArrowDown') ui.y2 += step;
+                        if (e.key === 'ArrowLeft') ui.x2 -= step;
+                        if (e.key === 'ArrowRight') ui.x2 += step;
+                    } else {
+                        if (e.key === 'ArrowUp') ui.height = Math.max(10, ui.height - step);
+                        if (e.key === 'ArrowDown') ui.height += step;
+                        if (e.key === 'ArrowLeft') ui.width = Math.max(10, ui.width - step);
+                        if (e.key === 'ArrowRight') ui.width += step;
+                    }
+                } else {
+                    if (ui.type === 'line') {
+                        if (e.key === 'ArrowUp') { ui.y1 -= step; ui.y2 -= step; }
+                        if (e.key === 'ArrowDown') { ui.y1 += step; ui.y2 += step; }
+                        if (e.key === 'ArrowLeft') { ui.x1 -= step; ui.x2 -= step; }
+                        if (e.key === 'ArrowRight') { ui.x1 += step; ui.x2 += step; }
+                    } else {
+                        if (e.key === 'ArrowUp') ui.y -= step;
+                        if (e.key === 'ArrowDown') ui.y += step;
+                        if (e.key === 'ArrowLeft') ui.x -= step;
+                        if (e.key === 'ArrowRight') ui.x += step;
+                    }
+                }
+                renderPreview();
+                syncTableInputsFromUI(selectedIdx);
+            }
+        }
+    });
+
+    document.addEventListener('keyup', e => {
+        if (isArrowMoving) {
+            const keys = ['ArrowUp', 'ArrowDown', 'ArrowLeft', 'ArrowRight'];
+            if (keys.includes(e.key)) {
+                if (tempDragState) commitStateToHistory(tempDragState);
+                tempDragState = null;
+                isArrowMoving = false;
+            }
+        }
+    });
+
+    function deleteDb(index) {
+        if(!confirm("이 DB 컬럼을 삭제하시겠습니까?\n(SQL 쿼리 내의 문장까지 함께 완벽하게 삭제됩니다)")) return;
+        dbColumnsList[index].isDeleted = true; 
+        reindexDbColumns(); 
+        renderSqlFromTemplate(); 
+        renderTables();
+    }
+    
+    function deleteUi(index) {
+        if(!confirm("이 UI 객체를 화면에서 삭제하시겠습니까?")) return;
+        uiControlsList[index].isDeleted = true; renderTables();
+    }
+
+    function analyzeDW(isAutoRefresh = false) {
+        if (!isAutoRefresh && uiControlsList.length > 0) {
+            if (!confirm("⚠️ 주의: 정말 초기화하시겠습니까?\n지금까지 수정하신 모든 좌표와 SQL이 원본으로 되돌아갑니다!")) return;
+        }
+
+        const src = document.getElementById('dwSource').value;
+        if (!src.trim()) return alert('소스를 입력해주세요.');
+        
+        lastAnalyzedSrc = src; 
+        dbColumnsList = []; uiControlsList = []; undoHistory = []; selectedIdx = -1;
+        sqlStartIndex = -1; sqlEndIndex = -1;
+        bandHeights = { header: 0, detail: 0, summary: 0, footer: 0 };
+        
+        if (!isAutoRefresh) document.getElementById('cardModified').style.display = 'none';
+
+        const sqlMatchStart = src.search(/retrieve\s*=\s*"/i);
+        if (sqlMatchStart !== -1) {
+            let eqIdx = src.indexOf('"', sqlMatchStart);
+            let sqlEnd = findPBStringEnd(src, eqIdx + 1);
+            if (sqlEnd !== -1) {
+                sqlStartIndex = eqIdx;
+                sqlEndIndex = sqlEnd + 1; 
+                let rawSql = src.substring(eqIdx + 1, sqlEnd); 
+                
+                // 💡 원본 SQL 100% 날것 그대로 로드 및 토큰화
+                // 사용자가 단일/이중 따옴표를 섞어썼을 수 있으므로 이스케이프 강제 변환 금지
+                sqlTemplate = rawSql; 
+            }
+        }
+
+        ['header', 'detail', 'summary', 'footer'].forEach(b => {
+            const match = src.match(new RegExp(`\\b${b}\\s*\\([^)]*height\\s*=\\s*(?:"(\\d+)"|(\\d+))`, 'i'));
+            if (match) bandHeights[b] = parseInt(match[1] || match[2] || 0);
+        });
+
+        const dbColStartRegex = /\bcolumn\s*=\s*\(/gi;
+        let dbMatch;
+        let colIndex = 1;
+        let uidCounter = 1;
+        while ((dbMatch = dbColStartRegex.exec(src)) !== null) {
+            let braceStart = dbMatch.index + dbMatch[0].length - 1; 
+            let endIdx = findBlockEnd(src, braceStart);
+            if (endIdx !== -1) {
+                let attr = src.substring(braceStart + 1, endIdx);
+                dbColumnsList.push({
+                    uid: uidCounter++, // 고유 불변 ID
+                    startIndex: dbMatch.index, endIndex: endIdx + 1,
+                    index: colIndex++, name: getAttr(attr, 'name'),
+                    dbname: getAttr(attr, 'dbname'), type: getAttr(attr, 'type'),
+                    originalMatch: src.substring(dbMatch.index, endIdx + 1), isDeleted: false
+                });
+            }
+        }
+
+        let sortedCols = [...dbColumnsList].sort((a,b) => {
+            let aName = (a.dbname.split('.').pop() || a.dbname).length;
+            let bName = (b.dbname.split('.').pop() || b.dbname).length;
+            return bName - aName;
+        });
+
+        sortedCols.forEach(db => {
+            let baseName = db.dbname.split('.').pop() || db.dbname;
+            if(!baseName) return;
+            const safeBase = baseName.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+            const regex = new RegExp(`(^|[^a-zA-Z0-9_가-힣])(${safeBase})(?=[^a-zA-Z0-9_가-힣]|$)`, 'gi');
+            sqlTemplate = sqlTemplate.replace(regex, `$1__DBCOL_${db.uid}__`);
+        });
+
+        renderSqlFromTemplate();
+
+        uiControlsList = parseUiControls(src).map(block => {
+            const attr = block.attr;
+            const parsedId = getAttr(attr, 'id') ? parseInt(getAttr(attr, 'id')) : null;
+            let txtContent = getAttr(attr, 'text');
+            if (txtContent) txtContent = txtContent.replace(/~"/g, '"').replace(/~r~n/g, '\n');
+            let exprContent = getAttr(attr, 'expression');
+            if (exprContent) exprContent = exprContent.replace(/~"/g, '"').replace(/~r~n/g, '\n');
+
+            return {
+                ...block,
+                name: getAttr(attr, 'name'), id: parsedId,
+                content: block.type === 'compute' ? exprContent : txtContent,
+                checkboxText: getAttr(attr, 'checkbox.text'),
+                band: getAttr(attr, 'band'),
+                x: parseInt(getAttr(attr, 'x') || 0), y: parseInt(getAttr(attr, 'y') || 0),
+                width: parseInt(getAttr(attr, 'width') || 100), height: parseInt(getAttr(attr, 'height') || 50),
+                x1: parseInt(getAttr(attr, 'x1') || 0), y1: parseInt(getAttr(attr, 'y1') || 0),
+                x2: parseInt(getAttr(attr, 'x2') || 0), y2: parseInt(getAttr(attr, 'y2') || 0),
+                pbBgColor: getAttr(attr, 'background.color'), pbColor: getAttr(attr, 'color'),
+                pbBorder: getAttr(attr, 'border'), penColor: getAttr(attr, 'pen.color'), penWidth: getAttr(attr, 'pen.width'),
+                fontFace: getAttr(attr, 'font.face'), fontHeight: getAttr(attr, 'font.height'), fontWeight: getAttr(attr, 'font.weight'),
+                isDeleted: false, selectedDbId: parsedId
+            };
+        });
+
+        uiControlsList.sort((a, b) => {
+            let typeCmp = a.type.localeCompare(b.type);
+            if (typeCmp !== 0) return typeCmp;
+            if (a.type === 'column') {
+                let idA = a.id !== null ? a.id : 999999;
+                let idB = b.id !== null ? b.id : 999999;
+                if (idA !== idB) return idA - idB;
+            }
+            let nameA = a.name || "";
+            let nameB = b.name || "";
+            return nameA.localeCompare(nameB);
+        });
+
+        renderTables(); 
+        if(!isAutoRefresh) document.getElementById('results').style.display = 'block';
+    }
+
+    function setDbAttrStr(str, attrName, value, useQuotes) {
+        const safeAttr = attrName.replace('.', '\\.');
+        const regex = new RegExp(`([\\s(])${safeAttr}\\s*=\\s*(?:"(?:~"|[^"])*"|[^\\s)]+)`, 'i');
+        const replacement = useQuotes ? `${attrName}="${value}"` : `${attrName}=${value}`;
+        if (regex.test(str)) return str.replace(regex, `$1${replacement}`);
+        else return str.replace(/\s*\)$/, ` ${replacement} )`);
+    }
+    
+    function setUiAttrStr(str, attrName, value, useQuotes = false) {
+        const safeAttr = attrName.replace('.', '\\.');
+        const regex = new RegExp(`([\\s(])${safeAttr}\\s*=\\s*(?:"(?:~"|[^"])*"|[^\\s)]+)`, 'i');
+        const replacement = useQuotes ? `${attrName}="${value}"` : `${attrName}=${value}`;
+        if (regex.test(str)) return str.replace(regex, `$1${replacement}`);
+        else return str.replace(/\s*\)$/, ` ${replacement} )`);
+    }
+
+    function generateModifiedSRD() {
+        let replacements = [];
+
+        // 💡 1. 쿼리 저장 시 날것 그대로("..." 감싸기만) 삽입
+        if (sqlStartIndex !== -1) {
+            let newSqlRaw = document.getElementById('sqlEditor').value;
+            replacements.push({
+                start: sqlStartIndex, end: sqlEndIndex,
+                text: `"${newSqlRaw}"` 
+            });
+        }
+
+        dbColumnsList.forEach(db => {
+            if (db.isDeleted) {
+                replacements.push({ start: db.startIndex, end: db.endIndex, text: "" });
+            } else {
+                let oldText = lastAnalyzedSrc.substring(db.startIndex, db.endIndex);
+                let newText = setDbAttrStr(oldText, 'name', db.name, false);     
+                newText = setDbAttrStr(newText, 'dbname', db.dbname, true);  
+                replacements.push({ start: db.startIndex, end: db.endIndex, text: newText });
+            }
+        });
+
+        uiControlsList.forEach(ui => {
+            if (ui.isDeleted) {
+                replacements.push({ start: ui.startIndex, end: ui.endIndex, text: "" });
+            } else {
+                let newText = lastAnalyzedSrc.substring(ui.startIndex, ui.endIndex);
+                newText = newText.replace(/"(border|color|x|y|x1|y1|x2|y2|width|height|name|visible|font\.[a-z]+|background\.[a-z]+|pen\.[a-z]+)\s*=/gi, '" $1=');
+
+                if (ui.type === 'line') {
+                    newText = setUiAttrStr(newText, 'x1', ui.x1, true); newText = setUiAttrStr(newText, 'y1', ui.y1, true);
+                    newText = setUiAttrStr(newText, 'x2', ui.x2, true); newText = setUiAttrStr(newText, 'y2', ui.y2, true);
+                } else {
+                    newText = setUiAttrStr(newText, 'x', ui.x, true); newText = setUiAttrStr(newText, 'y', ui.y, true);
+                    newText = setUiAttrStr(newText, 'width', ui.width, true); newText = setUiAttrStr(newText, 'height', ui.height, true);
+                }
+
+                newText = setUiAttrStr(newText, 'name', ui.name, false);
+
+                if (ui.type === 'column' && ui.selectedDbId !== null) {
+                    newText = setUiAttrStr(newText, 'id', ui.selectedDbId, false);
+                    const matchedDb = dbColumnsList.find(db => db.index === ui.selectedDbId);
+                    if (matchedDb && matchedDb.name) newText = setUiAttrStr(newText, 'name', matchedDb.name, false); 
+                }
+                replacements.push({ start: ui.startIndex, end: ui.endIndex, text: newText });
+            }
+        });
+
+        replacements.sort((a, b) => a.start - b.start);
+
+        let finalSrc = "";
+        let lastPos = 0;
+        replacements.forEach(r => {
+            finalSrc += lastAnalyzedSrc.substring(lastPos, r.start);
+            finalSrc += r.text;
+            lastPos = r.end;
+        });
+        finalSrc += lastAnalyzedSrc.substring(lastPos);
+
+        finalSrc = finalSrc.replace(/\n\s*\n\s*\n/g, '\n\n'); 
+
+        document.getElementById('modifiedSrdOutput').value = finalSrc;
+        document.getElementById('cardModified').style.display = 'block';
+        
+        document.getElementById('dwSource').value = finalSrc;
+        analyzeDW(true); 
+        
+        alert('최종 코드가 성공적으로 생성되었습니다!');
+    }
+</script>
+
+</body>
+</html>
