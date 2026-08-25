@@ -1,0 +1,372 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>PowerScript 스마트 포맷터</title>
+    <!-- CodeMirror 기본 CSS 및 Fold Gutter CSS -->
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/codemirror/5.65.13/codemirror.min.css">
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/codemirror/5.65.13/addon/fold/foldgutter.min.css">
+    <style>
+        :root {
+            --bg-color: #f4f6f9;
+            --container-bg: #ffffff;
+            --text-color: #333333;
+            --border-color: #cccccc;
+            --primary-btn: #3498db;
+            --secondary-btn: #555555;
+            --header-shadow: 0 4px 10px rgba(0,0,0,0.1);
+        }
+
+        [data-theme="dark"] {
+            --bg-color: #121212;
+            --container-bg: #1e1e1e;
+            --text-color: #e0e0e0;
+            --border-color: #444444;
+            --primary-btn: #2980b9;
+            --secondary-btn: #cccccc;
+            --header-shadow: 0 4px 15px rgba(0,0,0,0.3);
+        }
+
+        body {
+            font-family: 'Malgun Gothic', 'Segoe UI', sans-serif;
+            background-color: var(--bg-color);
+            color: var(--text-color);
+            margin: 0;
+            transition: background-color 0.3s, color 0.3s;
+            height: 100vh;
+            display: flex;
+            flex-direction: column;
+            overflow: hidden;
+        }
+
+        .sticky-header {
+            position: sticky;
+            top: 0;
+            background: var(--container-bg);
+            padding: 15px 30px;
+            box-shadow: var(--header-shadow);
+            z-index: 1000;
+            display: flex;
+            flex-direction: column;
+            gap: 10px;
+            transition: background-color 0.3s;
+        }
+
+        .header-top {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+        }
+
+        h2 { margin: 0; font-size: 22px; color: var(--text-color); }
+
+        .btn-theme {
+            background-color: transparent;
+            color: var(--secondary-btn);
+            font-size: 16px;
+            border: none;
+            cursor: pointer;
+            font-weight: bold;
+        }
+
+        .toolbar { display: flex; gap: 10px; flex-wrap: wrap; }
+        
+        button.tool-btn {
+            padding: 10px 20px;
+            border: none;
+            border-radius: 5px;
+            cursor: pointer;
+            font-size: 14px;
+            font-weight: bold;
+        }
+        .btn-format { background-color: var(--primary-btn); color: white; }
+        .btn-copy { background-color: #2ecc71; color: white; }
+        .btn-clear { background-color: #e74c3c; color: white; }
+
+        #editorContainer {
+            flex: 1;
+            position: relative;
+            background: var(--container-bg);
+            overflow: auto;
+        }
+
+        .CodeMirror {
+            height: 100%;
+            font-family: 'Consolas', 'Courier New', monospace;
+            font-size: 15px;
+            line-height: 1.6;
+        }
+        
+        .cm-s-pb-theme .CodeMirror-cursor { border-left: 2px solid #333333 !important; }
+
+        .cm-s-pb-theme .cm-keyword { color: #0000FF; font-weight: bold; }
+        .cm-s-pb-theme .cm-string { color: #FF0000; }
+        /* 주석 색상 지정 (초록색, 이탤릭) */
+        .cm-s-pb-theme .cm-comment { color: #008000; font-style: italic; }
+        .cm-s-pb-theme .cm-number { color: #800080; }
+
+        .cm-s-pb-theme-dark.CodeMirror { background: #2d2d2d; color: #e0e0e0; }
+        .cm-s-pb-theme-dark .CodeMirror-gutters { background: #1e1e1e; border-right: 1px solid #444; }
+        .cm-s-pb-theme-dark .cm-keyword { color: #7fdbff; font-weight: bold; }
+        .cm-s-pb-theme-dark .cm-string { color: #ff8c8c; }
+        /* 다크 모드 주석 색상 */
+        .cm-s-pb-theme-dark .cm-comment { color: #99cc99; font-style: italic; }
+        .cm-s-pb-theme-dark .cm-number { color: #c080ff; }
+        
+        .cm-s-pb-theme-dark .CodeMirror-cursor { border-left: 2px solid #ffffff !important; }
+
+        .CodeMirror-line .cm-tab {
+            border-left: 1px solid rgba(128, 128, 128, 0.3);
+            box-sizing: border-box;
+        }
+        .cm-s-pb-theme-dark .CodeMirror-line .cm-tab {
+            border-left: 1px solid rgba(255, 255, 255, 0.15);
+        }
+
+        .CodeMirror-foldgutter { width: 16px; }
+        .CodeMirror-foldgutter-open::after { content: '▼'; font-size: 11px; color: #888; margin-left: 2px; cursor: pointer; }
+        .CodeMirror-foldgutter-folded::after { content: '▶'; font-size: 11px; color: var(--primary-btn); margin-left: 2px; cursor: pointer; font-weight: bold; }
+        
+        .CodeMirror-foldmarker {
+            color: var(--text-color);
+            background: rgba(128, 128, 128, 0.2);
+            text-shadow: none; 
+            padding: 0 6px;
+            border-radius: 4px;
+            cursor: pointer;
+            margin: 0 4px;
+            font-family: monospace;
+            font-size: 12px;
+            line-height: normal;
+        }
+        
+        [data-theme="dark"] .CodeMirror-foldmarker {
+            color: #ffffff;
+            background: rgba(255, 255, 255, 0.2);
+        }
+
+        #editorContainer::-webkit-scrollbar { width: 10px; }
+        #editorContainer::-webkit-scrollbar-thumb { background: #bbb; border-radius: 5px; }
+        [data-theme="dark"] #editorContainer::-webkit-scrollbar-thumb { background: #555; }
+    </style>
+</head>
+<body class="cm-s-pb-theme">
+
+<div class="sticky-header">
+    <div class="header-top">
+        <h2>✨ PowerScript 스마트 포맷터</h2>
+        <button class="btn-theme" onclick="toggleTheme()" id="themeBtn">🌙 다크 모드</button>
+    </div>
+    
+    <div class="toolbar">
+        <button class="tool-btn btn-format" onclick="formatCode()">🚀 코드 정렬 (Format)</button>
+        <button class="tool-btn btn-copy" onclick="copyCode()">📋 복사 (Copy)</button>
+        <button class="tool-btn btn-clear" onclick="clearCode()">🗑️ 지우기 (Clear)</button>
+    </div>
+</div>
+
+<div id="editorContainer">
+    <textarea id="pbEditor"></textarea>
+</div>
+
+<script src="https://cdnjs.cloudflare.com/ajax/libs/codemirror/5.65.13/codemirror.min.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/codemirror/5.65.13/addon/fold/foldcode.min.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/codemirror/5.65.13/addon/fold/foldgutter.min.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/codemirror/5.65.13/addon/fold/indent-fold.min.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/codemirror/5.65.13/mode/pascal/pascal.min.js"></script>
+
+<script>
+    // [핵심 수정] CodeMirror의 구문 분석기(Tokenizer)를 확장하여 파워빌더 주석 스타일 강제 적용
+    CodeMirror.defineMode("powerscript", function(config) {
+        var pascalMode = CodeMirror.getMode(config, "text/x-pascal");
+        
+        return {
+            startState: function() {
+                return {
+                    pascalState: CodeMirror.startState(pascalMode),
+                    inBlockComment: false
+                };
+            },
+            token: function(stream, state) {
+                // 1. 다중행 주석 상태일 때
+                if (state.inBlockComment) {
+                    if (stream.match("*/")) {
+                        state.inBlockComment = false;
+                        return "comment";
+                    }
+                    stream.next();
+                    return "comment";
+                }
+
+                // 2. 다중행 주석 시작 확인
+                if (stream.match("/*")) {
+                    state.inBlockComment = true;
+                    return "comment";
+                }
+
+                // 3. 한 줄 주석 (//) 확인
+                if (stream.match("//")) {
+                    stream.skipToEnd();
+                    return "comment";
+                }
+
+                // 4. 나머지는 기본 Pascal 모드에 위임
+                return pascalMode.token(stream, state.pascalState);
+            },
+            indent: function(state, textAfter) {
+                return pascalMode.indent(state.pascalState, textAfter);
+            }
+        };
+    });
+
+    CodeMirror.registerHelper("fold", "powerscript", CodeMirror.fold.indent);
+
+    // [수정] 위에서 만든 "powerscript" 모드를 사용하도록 변경
+    var editor = CodeMirror.fromTextArea(document.getElementById("pbEditor"), {
+        mode: "powerscript", 
+        lineNumbers: true,
+        lineWrapping: false,
+        foldGutter: true,
+        gutters: ["CodeMirror-linenumbers", "CodeMirror-foldgutter"],
+        theme: "pb-theme",
+        viewportMargin: Infinity,
+        tabSize: 4,
+        indentWithTabs: true,
+        foldOptions: {
+            widget: "..." 
+        }
+    });
+
+    function formatCode() {
+        const lines = editor.getValue().split('\n');
+        let result = [];
+        let indentLevel = 0;
+        const indentStr = "\t"; 
+        
+        let inBlockComment = false;
+        let isContinuation = false;
+
+        for (let i = 0; i < lines.length; i++) {
+            let line = lines[i].trim();
+            
+            if (!line) { 
+                result.push(indentStr.repeat(Math.max(0, indentLevel))); 
+                continue; 
+            }
+
+            if (inBlockComment) {
+                result.push(indentStr.repeat(Math.max(0, indentLevel)) + line);
+                if (line.includes("*/")) {
+                    inBlockComment = false;
+                }
+                continue;
+            }
+            
+            if (line.startsWith("/*") && !line.includes("*/")) {
+                inBlockComment = true;
+                result.push(indentStr.repeat(Math.max(0, indentLevel)) + line);
+                continue;
+            }
+            
+            if (line.startsWith("/*") && line.includes("*/")) {
+                 result.push(indentStr.repeat(Math.max(0, indentLevel)) + line);
+                 continue;
+            }
+
+            let codePart = line;
+            let commentIdx = codePart.indexOf("//");
+            if (commentIdx !== -1) { 
+                codePart = codePart.substring(0, commentIdx).trim(); 
+            }
+
+            if (!codePart) {
+                result.push(indentStr.repeat(Math.max(0, indentLevel)) + line);
+                continue;
+            }
+
+            let applyContinuation = isContinuation;
+            isContinuation = codePart.endsWith("&");
+            if (isContinuation) { 
+                codePart = codePart.substring(0, codePart.length - 1).trim(); 
+            }
+
+            let matchLine = codePart.toUpperCase().replace(/\s+/g, ' ');
+            let currentIndent = indentLevel;
+
+            if (matchLine.startsWith("END IF") || matchLine.startsWith("ENDIF") ||
+                matchLine.startsWith("NEXT") || matchLine.startsWith("LOOP") ||
+                matchLine.startsWith("END TRY") || matchLine.startsWith("ENDTRY")) {
+                indentLevel = Math.max(0, indentLevel - 1);
+                currentIndent = indentLevel;
+            } else if (matchLine.startsWith("END CHOOSE") || matchLine.startsWith("ENDCHOOSE")) {
+                indentLevel = Math.max(0, indentLevel - 2);
+                currentIndent = indentLevel;
+            } else if (matchLine.startsWith("ELSE IF") || matchLine.startsWith("ELSEIF") ||
+                     matchLine === "ELSE" || matchLine.startsWith("CATCH") || matchLine.startsWith("FINALLY") ||
+                     matchLine.startsWith("CASE ") || matchLine === "CASE") {
+                currentIndent = Math.max(0, indentLevel - 1);
+            }
+
+            let finalIndent = Math.max(0, currentIndent + (applyContinuation ? 1 : 0));
+            result.push(indentStr.repeat(finalIndent) + line);
+
+            if ((matchLine.startsWith("IF ") || matchLine.startsWith("IF(")) && matchLine.endsWith("THEN")) {
+                indentLevel++;
+            } else if (matchLine.startsWith("FOR ") || matchLine === "DO" ||
+                     matchLine.startsWith("DO WHILE ") || matchLine.startsWith("DO UNTIL ") ||
+                     matchLine === "TRY") {
+                indentLevel++;
+            } else if (matchLine.startsWith("CHOOSE CASE ")) {
+                indentLevel += 2;
+            }
+        }
+        
+        editor.setValue(result.join('\n'));
+    }
+
+    function copyCode() {
+        const content = editor.getValue();
+        if (!content) return;
+        
+        navigator.clipboard.writeText(content).then(() => {
+            const btn = document.querySelector('.btn-copy');
+            const originalText = btn.innerHTML;
+            btn.innerHTML = "✅ 복사 완료!";
+            setTimeout(() => btn.innerHTML = originalText, 1500);
+        });
+    }
+
+    function clearCode() {
+        editor.setValue("");
+        editor.focus();
+    }
+
+    function toggleTheme() {
+        const body = document.documentElement;
+        const btn = document.getElementById('themeBtn');
+        
+        if (body.getAttribute('data-theme') === 'dark') {
+            body.removeAttribute('data-theme');
+            editor.setOption("theme", "pb-theme");
+            btn.innerHTML = "🌙 다크 모드";
+            localStorage.setItem('theme', 'light');
+        } else {
+            body.setAttribute('data-theme', 'dark');
+            editor.setOption("theme", "pb-theme-dark");
+            btn.innerHTML = "☀️ 라이트 모드";
+            localStorage.setItem('theme', 'dark');
+        }
+    }
+
+    window.onload = function() {
+        if (localStorage.getItem('theme') === 'dark') {
+            document.documentElement.setAttribute('data-theme', 'dark');
+            editor.setOption("theme", "pb-theme-dark");
+            document.getElementById('themeBtn').innerHTML = "☀️ 라이트 모드";
+        }
+    }
+</script>
+
+</body>
+</html>
