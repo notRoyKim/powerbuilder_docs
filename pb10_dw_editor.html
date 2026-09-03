@@ -86,6 +86,14 @@
         .pb-band { position: relative; width: 100%; border-bottom: 2px dashed #adb5bd; margin-bottom: 2px; min-width: 800px; }
         .pb-band-label { position: absolute; left: 5px; top: 5px; font-size: 11px; font-weight: bold; color: #adb5bd; pointer-events: none; z-index: 0; }
         
+        /* ---------- 💡 추가: Band 경계선 드래그 핸들러 ---------- */
+        .band-resizer {
+            position: absolute; bottom: -4px; left: 0; width: 100%; height: 8px;
+            cursor: ns-resize; z-index: 50; background-color: transparent;
+        }
+        .band-resizer:hover { background-color: rgba(0, 123, 255, 0.4); }
+        .is-resizing .band-resizer { background-color: rgba(0, 123, 255, 0.6); }
+
         .pb-control {
             position: absolute; box-sizing: border-box; font-size: 11px; 
             display: flex; align-items: center; justify-content: center;
@@ -151,7 +159,7 @@
 
 <div class="container">
     <h1>PB DW Analyzer & Editor Pro 🛠️</h1>
-    <p>누락되었던 핵심 렌더링 함수들을 완벽하게 복구했습니다. (SQL `~"` 강제 삽입 로직도 완전 제거)</p>
+    <p>실제 DataWindow Editor처럼 구역(Band) 크기 조절 기능을 완벽하게 지원합니다.</p>
     
     <div class="input-group">
         <textarea id="dwSource" placeholder="여기에 원본 SRD 소스 코드를 붙여넣으세요..."></textarea>
@@ -167,9 +175,8 @@
             <div class="result-header">🗄️ SQL / Retrieve Statement (자동 동기화 됨)</div>
             <div class="result-body">
                 <p style="margin-top:0; font-size:12px; color:#d9534f; font-weight:bold;">
-                    ※ '1. DB 컬럼' 목록을 수정하면 아래 쿼리에 실시간으로 반영됩니다! 
+                    ※ '1. DB 컬럼' 목록이 곧 기준입니다. 입력하면 즉시 이 창의 쿼리가 매핑되어 완벽하게 재조립됩니다.
                 </p>
-                <!-- oninput으로 사용자가 직접 편집할때 템플릿 갱신하도록 함 -->
                 <textarea id="sqlEditor" style="width: 100%; height: 150px; font-family: Consolas, monospace; font-size: 13px; padding: 10px; border: 1px solid var(--border-color); border-radius: 4px; background-color: #272822; color: #f8f8f2;" oninput="updateSqlTemplateFromEditor()"></textarea>
             </div>
         </div>
@@ -193,17 +200,29 @@
         </div>
 
         <div class="result-card">
-            <div class="result-header">
-                <div style="display: flex; align-items: center; flex-wrap: wrap; gap: 8px;">
-                    <span>🖼️ 2. 화면 UI 미리보기 (Drag & Arrow Keys)</span>
-                    <span class="shortcut-tip">⌨️ 방향키(이동)</span>
-                    <span class="shortcut-tip">⌨️ Shift+방향키(크기조절)</span>
-                    <span class="shortcut-tip">⌨️ Ctrl+Z(취소)</span>
+            <!-- 💡 추가: Band 컨트롤 헤더 UI -->
+            <div class="result-header" style="flex-direction: column; align-items: flex-start; gap: 10px;">
+                <div style="display: flex; align-items: center; justify-content: space-between; width: 100%;">
+                    <div style="display: flex; align-items: center; flex-wrap: wrap; gap: 8px;">
+                        <span>🖼️ 2. 화면 UI 미리보기 (Drag & Arrow Keys)</span>
+                        <span class="shortcut-tip">⌨️ 방향키(이동)</span>
+                        <span class="shortcut-tip">⌨️ Shift+방향키(크기조절)</span>
+                        <span class="shortcut-tip">⌨️ Ctrl+Z(취소)</span>
+                    </div>
+                    <label class="toggle-switch">
+                        <input type="checkbox" id="modeToggle" onchange="togglePreviewMode()">
+                        실제 화면처럼 보기 (PB Mode)
+                    </label>
                 </div>
-                <label class="toggle-switch">
-                    <input type="checkbox" id="modeToggle" onchange="togglePreviewMode()">
-                    실제 화면처럼 보기 (PB Mode)
-                </label>
+                <!-- 💡 추가: 수치 입력 패널 -->
+                <div style="font-size:12px; background:#fff; padding:6px 12px; border-radius:4px; border:1px solid #ccc; display:flex; gap:15px; width: 100%; box-sizing: border-box; align-items: center;">
+                    <b style="color:#0056b3;">📏 구역(Band) 높이:</b>
+                    <label>Header <input type="number" id="band_inp_header" onchange="updateBandHeight('header', this.value)" style="width:60px;"></label>
+                    <label>Detail <input type="number" id="band_inp_detail" onchange="updateBandHeight('detail', this.value)" style="width:60px;"></label>
+                    <label>Summary <input type="number" id="band_inp_summary" onchange="updateBandHeight('summary', this.value)" style="width:60px;"></label>
+                    <label>Footer <input type="number" id="band_inp_footer" onchange="updateBandHeight('footer', this.value)" style="width:60px;"></label>
+                    <span style="color:#dc3545; font-size:11px;">※ 화면상의 점선 경계선을 마우스로 위아래 드래그하셔도 됩니다.</span>
+                </div>
             </div>
             <div class="result-body">
                 <div id="dwPreviewContainer" class="preview-edit"></div>
@@ -251,7 +270,6 @@
     let sqlStartIndex = -1;
     let sqlEndIndex = -1;
     
-    // 💡 쿼리를 안전하게 매핑할 토큰 템플릿
     let sqlTemplate = ""; 
 
     const scale = 0.25; 
@@ -259,6 +277,12 @@
     let undoHistory = [];
     let tempDragState = null;
     let isArrowMoving = false; 
+
+    // 💡 Band 높이 전용 조절 함수
+    function updateBandHeight(band, val) {
+        bandHeights[band] = parseInt(val) || 0;
+        renderPreview();
+    }
 
     function pbColorToHex(pbColorStr) {
         let c = parseInt(pbColorStr);
@@ -272,7 +296,6 @@
         return `rgb(${r},${g},${b})`;
     }
 
-    // 💡 SQL 블록 탐색기 (이스케이프 ~" 무시)
     function findPBStringEnd(src, startIdx) {
         let inString = false;
         for (let i = startIdx; i < src.length; i++) {
@@ -330,7 +353,6 @@
         return results;
     }
 
-    // 💡 [복구된 핵심 함수들 시작]
     function getCoordsSnapshot() {
         return uiControlsList.map(ui => ({
             x: ui.x, y: ui.y, width: ui.width, height: ui.height,
@@ -357,16 +379,13 @@
         uiControlsList[idx].name = val;
         renderPreview(); 
     }
-    // 💡 [복구된 핵심 함수들 끝]
 
-    // 💡 [개선] DB 컬럼 입력 시 템플릿을 통한 SQL 재조립
     function updateDbNameAndSQL(idx, field, inputElement) {
         let db = dbColumnsList[idx];
-        db[field] = inputElement.value; // 변경된 이름 반영
-        renderSqlFromTemplate(); // 템플릿 기반으로 쿼리 재조립 (절대 안엉킴)
+        db[field] = inputElement.value; 
+        renderSqlFromTemplate(); 
     }
 
-    // 💡 템플릿의 `__DBCOL_uid__` 토큰들을 현재 DB 컬럼 이름들로 치환
     function renderSqlFromTemplate() {
         let currentSql = sqlTemplate;
 
@@ -380,7 +399,6 @@
             }
         });
 
-        // 삭제 마커(____DEL____) 깔끔하게 정리
         currentSql = currentSql.replace(/[a-zA-Z0-9_가-힣]+\.\_\_\_\_DEL\_\_\_\_\s*,\s*/g, ''); 
         currentSql = currentSql.replace(/,\s*[a-zA-Z0-9_가-힣]+\.\_\_\_\_DEL\_\_\_\_/g, '');
         currentSql = currentSql.replace(/\_\_\_\_DEL\_\_\_\_\s*,\s*/g, '');
@@ -391,7 +409,6 @@
         document.getElementById('sqlEditor').value = currentSql;
     }
 
-    // 💡 사용자가 직접 SQL 창 편집 시 템플릿 역기록
     function updateSqlTemplateFromEditor() {
         let currentSql = document.getElementById('sqlEditor').value;
         let sortedCols = [...dbColumnsList].sort((a,b) => {
@@ -523,12 +540,23 @@
         const bandElements = {};
         ['header', 'detail', 'summary', 'footer'].forEach(band => {
             if (bandHeights[band] !== undefined) {
+                // 상단 입력창 수치 갱신
+                let inp = document.getElementById(`band_inp_${band}`);
+                if (inp) inp.value = bandHeights[band];
+
                 let hPx = Math.max(bandHeights[band] * scale, 30); 
                 const bandDiv = document.createElement('div');
                 bandDiv.className = 'pb-band';
                 bandDiv.style.height = `${hPx}px`;
                 bandDiv.style.backgroundColor = (band === 'detail') ? '#ffffff' : '#f8f9fa';
-                bandDiv.innerHTML = `<div class="pb-band-label">${band.toUpperCase()}</div>`;
+                bandDiv.innerHTML = `<div class="pb-band-label">${band.toUpperCase()} (${bandHeights[band]})</div>`;
+                
+                // 💡 Band 크기 조절용 핸들(점선 경계부)
+                const resizer = document.createElement('div');
+                resizer.className = 'band-resizer';
+                resizer.dataset.band = band;
+                bandDiv.appendChild(resizer);
+
                 container.appendChild(bandDiv);
                 bandElements[band] = bandDiv;
             }
@@ -616,7 +644,24 @@
     let hasMoved = false;
     let startX, startY, origX, origY, origX2, origY2, origW, origH;
 
+    // 💡 Band 높이 조절을 위한 상태 변수
+    let isBandDragging = false;
+    let dragTargetBand = null;
+    let startBandHeight = 0;
+
     document.addEventListener('mousedown', e => {
+        // 💡 Band Resizer 드래그 시작
+        let bandResizer = e.target.closest('.band-resizer');
+        if (bandResizer) {
+            isBandDragging = true;
+            dragTargetBand = bandResizer.dataset.band;
+            startBandHeight = bandHeights[dragTargetBand];
+            startY = e.clientY;
+            document.body.classList.add('is-resizing');
+            return;
+        }
+
+        // 일반 UI 컨트롤 드래그
         let handle = e.target.closest('.line-handle');
         let resizeHandle = e.target.closest('.resize-handle');
         let target = e.target.closest('.pb-control');
@@ -658,6 +703,26 @@
     });
 
     document.addEventListener('mousemove', e => {
+        // 💡 Band Resizer 드래그 중 시각적 피드백
+        if (isBandDragging) {
+            let deltaY = Math.round((e.clientY - startY) / scale);
+            let newHeight = Math.max(0, startBandHeight + deltaY);
+            bandHeights[dragTargetBand] = newHeight;
+            
+            let inp = document.getElementById(`band_inp_${dragTargetBand}`);
+            if (inp) inp.value = newHeight;
+            
+            let bandDivs = document.querySelectorAll('.pb-band');
+            bandDivs.forEach(div => {
+                if (div.querySelector(`.band-resizer[data-band="${dragTargetBand}"]`)) {
+                    div.style.height = Math.max(newHeight * scale, 30) + 'px';
+                    let label = div.querySelector('.pb-band-label');
+                    if (label) label.textContent = `${dragTargetBand.toUpperCase()} (${newHeight})`;
+                }
+            });
+            return;
+        }
+
         if (!isDragging || dragTargetIdx === -1) return;
         hasMoved = true;
         
@@ -707,6 +772,15 @@
     }
 
     document.addEventListener('mouseup', e => {
+        // 💡 Band Resizer 종료
+        if (isBandDragging) {
+            isBandDragging = false;
+            dragTargetBand = null;
+            document.body.classList.remove('is-resizing');
+            renderPreview(); // 안의 요소들 좌표 정리를 위해 재렌더링
+            return;
+        }
+
         if (isDragging) {
             isDragging = false;
             document.body.classList.remove('is-dragging', 'is-resizing');
@@ -822,9 +896,6 @@
                 sqlStartIndex = eqIdx;
                 sqlEndIndex = sqlEnd + 1; 
                 let rawSql = src.substring(eqIdx + 1, sqlEnd); 
-                
-                // 💡 원본 SQL 100% 날것 그대로 로드 및 토큰화
-                // 사용자가 단일/이중 따옴표를 섞어썼을 수 있으므로 이스케이프 강제 변환 금지
                 sqlTemplate = rawSql; 
             }
         }
@@ -844,7 +915,7 @@
             if (endIdx !== -1) {
                 let attr = src.substring(braceStart + 1, endIdx);
                 dbColumnsList.push({
-                    uid: uidCounter++, // 고유 불변 ID
+                    uid: uidCounter++, 
                     startIndex: dbMatch.index, endIndex: endIdx + 1,
                     index: colIndex++, name: getAttr(attr, 'name'),
                     dbname: getAttr(attr, 'dbname'), type: getAttr(attr, 'type'),
@@ -930,12 +1001,31 @@
     function generateModifiedSRD() {
         let replacements = [];
 
-        // 💡 1. 쿼리 저장 시 날것 그대로("..." 감싸기만) 삽입
+        // 💡 1. 구역(Band) 크기 적용 로직
+        let skeleton = lastAnalyzedSrc;
+        ['header', 'detail', 'summary', 'footer'].forEach(b => {
+            if (bandHeights[b] !== undefined) {
+                let bandRegex = new RegExp(`\\b${b}\\s*\\(([^)]*)\\)`, 'i');
+                skeleton = skeleton.replace(bandRegex, (fullMatch, innerText) => {
+                    if (/height\s*=/i.test(innerText)) {
+                        let newInner = innerText.replace(/height\s*=\s*(?:"\d+"|\d+)/i, `height=${bandHeights[b]}`);
+                        return `${b}(${newInner})`;
+                    } else {
+                        return `${b}(height=${bandHeights[b]} ${innerText})`;
+                    }
+                });
+            }
+        });
+
+        // 💡 이제 이 skeleton을 기준으로 replacements를 수집 (인덱스는 lastAnalyzedSrc 기준이므로 그대로 진행 가능? 아님. skeleton이 변하면 인덱스가 꼬임)
+        // 안전하게 하려면 lastAnalyzedSrc 기준 인덱스를 가지고 쪼갠 배열 조립 후 마지막에 Band 높이를 바꾸는 것이 낫습니다.
+
         if (sqlStartIndex !== -1) {
             let newSqlRaw = document.getElementById('sqlEditor').value;
+            let escapedSql = newSqlRaw.replace(/"/g, '~"'); 
             replacements.push({
                 start: sqlStartIndex, end: sqlEndIndex,
-                text: `"${newSqlRaw}"` 
+                text: `"${escapedSql}"` 
             });
         }
 
@@ -989,13 +1079,28 @@
 
         finalSrc = finalSrc.replace(/\n\s*\n\s*\n/g, '\n\n'); 
 
+        // 💡 방금 다 조립된 따끈따끈한 finalSrc에서 Band 높이만 다시 교체
+        ['header', 'detail', 'summary', 'footer'].forEach(b => {
+            if (bandHeights[b] !== undefined) {
+                let bandRegex = new RegExp(`\\b${b}\\s*\\(([^)]*)\\)`, 'i');
+                finalSrc = finalSrc.replace(bandRegex, (fullMatch, innerText) => {
+                    if (/height\s*=/i.test(innerText)) {
+                        let newInner = innerText.replace(/height\s*=\s*(?:"\d+"|\d+)/i, `height=${bandHeights[b]}`);
+                        return `${b}(${newInner})`;
+                    } else {
+                        return `${b}(height=${bandHeights[b]} ${innerText})`;
+                    }
+                });
+            }
+        });
+
         document.getElementById('modifiedSrdOutput').value = finalSrc;
         document.getElementById('cardModified').style.display = 'block';
         
         document.getElementById('dwSource').value = finalSrc;
         analyzeDW(true); 
         
-        alert('최종 코드가 성공적으로 생성되었습니다!');
+        alert('최종 코드가 성공적으로 생성 및 반영되었습니다!');
     }
 </script>
 
