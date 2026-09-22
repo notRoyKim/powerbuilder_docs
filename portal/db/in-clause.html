@@ -1,0 +1,124 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>IN절 생성기</title>
+<link rel="stylesheet" href="https://cdn.jsdelivr.net/gh/orioncactus/pretendard@v1.3.9/dist/web/static/pretendard.min.css">
+<link rel="stylesheet" href="../assets/portal.css">
+</head>
+<body>
+
+<div id="form">
+  <div class="card">
+    <div class="grid c2">
+      <div class="field span-all">
+        <label for="src">값 목록</label>
+        <textarea id="src" rows="10" placeholder="엑셀 열, 메모장 줄바꿈, 쉼표/탭 구분 모두 가능"></textarea>
+        <div class="hint" id="count"></div>
+      </div>
+    </div>
+    <div class="grid c4" style="margin-top:12px">
+      <div class="field">
+        <label for="col">컬럼명</label>
+        <input type="text" id="col" placeholder="예: ORDER_NO">
+        <div class="hint">비우면 괄호 안 값만 출력</div>
+      </div>
+      <div class="field">
+        <label for="quote">따옴표</label>
+        <select id="quote">
+          <option value="single">'문자'</option>
+          <option value="none">숫자 (따옴표 없음)</option>
+          <option value="double">"문자"</option>
+        </select>
+      </div>
+      <div class="field">
+        <label for="chunk">분할 단위</label>
+        <input type="number" id="chunk" value="1000" min="0">
+        <div class="hint">Oracle IN 최대 1000개 · 0 = 분할 안 함</div>
+      </div>
+      <div class="field">
+        <label for="perLine">한 줄에 값 개수</label>
+        <input type="number" id="perLine" value="10" min="1">
+      </div>
+    </div>
+    <div class="btn-row" style="margin-top:12px; gap:16px">
+      <label class="check"><input type="checkbox" id="dedupe" checked>중복 제거</label>
+      <label class="check"><input type="checkbox" id="trim" checked>앞뒤 공백 제거</label>
+      <label class="check"><input type="checkbox" id="upper">대문자로</label>
+      <label class="check"><input type="checkbox" id="notIn">NOT IN</label>
+    </div>
+  </div>
+
+  <div class="card">
+    <div class="card-title">결과</div>
+    <div class="code-wrap">
+      <button type="button" class="btn sm" id="btnCopy">복사</button>
+      <pre class="code" id="out"></pre>
+    </div>
+  </div>
+</div>
+
+<script src="../assets/menu.js"></script>
+<script src="../assets/layout.js"></script>
+<script>
+(function () {
+  'use strict';
+  var $ = function (id) { return document.getElementById(id); };
+
+  function build() {
+    var raw = $('src').value.split(/\r?\n|\t|,/);
+    var vals = raw.map(function (v) { return $('trim').checked ? v.trim() : v; }).filter(function (v) { return v.trim() !== ''; });
+    if ($('upper').checked) vals = vals.map(function (v) { return v.toUpperCase(); });
+    var total = vals.length;
+    if ($('dedupe').checked) {
+      var seen = {};
+      vals = vals.filter(function (v) { if (seen[v]) return false; seen[v] = 1; return true; });
+    }
+    $('count').textContent = total ? '입력 ' + total + '건 → 결과 ' + vals.length + '건' + (total !== vals.length ? ' (중복 ' + (total - vals.length) + '건 제거)' : '') : '';
+
+    var q = $('quote').value;
+    var fmt = vals.map(function (v) {
+      if (q === 'single') return "'" + v.replace(/'/g, "''") + "'";
+      if (q === 'double') return '"' + v.replace(/"/g, '""') + '"';
+      return v;
+    });
+
+    var size = parseInt($('chunk').value, 10) || 0;
+    var per = Math.max(1, parseInt($('perLine').value, 10) || 10);
+    var groups = [];
+    if (!size) groups = [fmt];
+    else for (var i = 0; i < fmt.length; i += size) groups.push(fmt.slice(i, i + size));
+
+    var col = $('col').value.trim();
+    var op = $('notIn').checked ? 'NOT IN' : 'IN';
+    var join = $('notIn').checked ? 'AND' : 'OR';
+
+    function body(g, ind) {
+      var lines = [];
+      for (var k = 0; k < g.length; k += per) lines.push(g.slice(k, k + per).join(', '));
+      return lines.join(',\n' + ind);
+    }
+
+    var out;
+    if (!fmt.length) out = '';
+    else if (!col) out = groups.map(function (g) { return '(' + body(g, ' ') + ')'; }).join('\n\n');
+    else if (groups.length === 1) out = col + ' ' + op + ' (' + body(groups[0], new Array(col.length + op.length + 4).join(' ')) + ')';
+    else {
+      out = '(\n' + groups.map(function (g, gi) {
+        return '    ' + (gi ? join + ' ' : '') + col + ' ' + op + ' (' + body(g, '        ') + ')';
+      }).join('\n') + '\n)';
+    }
+    $('out').innerHTML = out ? Portal.highlightSql(out) : '<span class="cm">-- 값을 입력하면 여기에 표시됩니다.</span>';
+    $('out').dataset.raw = out;
+  }
+
+  $('form').addEventListener('input', build);
+  $('form').addEventListener('change', build);
+  $('btnCopy').onclick = function () { Portal.copy($('out').dataset.raw || '', this); };
+  Portal.persist($('form'));
+  build();
+})();
+</script>
+</body>
+</html>

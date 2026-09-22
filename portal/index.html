@@ -1,0 +1,49 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>전산업무 포털</title>
+<link rel="stylesheet" href="https://cdn.jsdelivr.net/gh/orioncactus/pretendard@v1.3.9/dist/web/static/pretendard.min.css">
+<link rel="stylesheet" href="assets/portal.css">
+</head>
+<body>
+
+<section class="home-hero">
+  <h1 id="homeTitle"></h1>
+  <p id="homeSub"></p>
+  <input type="text" id="homeFilter" placeholder="도구 이름·키워드로 찾기 (예: merge, 로그, in)">
+</section>
+<div id="homeList"></div>
+
+<script src="assets/menu.js"></script>
+<script src="assets/layout.js"></script>
+<script>
+(function () {
+  var M = Portal.menu, esc = Portal.esc;
+  document.getElementById('homeTitle').textContent = M.title;
+  document.getElementById('homeSub').textContent = M.subtitle || '';
+  var box = document.getElementById('homeList');
+  var input = document.getElementById('homeFilter');
+
+  function render() {
+    var q = input.value.trim().toLowerCase();
+    var html = M.categories.map(function (c) {
+      var items = c.items.filter(function (i) {
+        return !q || [i.name, i.desc, c.name, (i.tags || []).join(' ')].join(' ').toLowerCase().indexOf(q) > -1;
+      });
+      if (!items.length) return '';
+      return '<div class="home-cat"><h2>' + esc(c.name) + ' <span class="badge">' + items.length + '</span></h2>' +
+        '<div class="tool-cards">' + items.map(function (i) {
+          return '<a class="tool-card" href="' + Portal.root + i.file + '"><b>' + esc(i.name) + '</b><span>' +
+            esc(i.desc || '') + '</span><small>' + esc(i.file) + '</small></a>';
+        }).join('') + '</div></div>';
+    }).join('');
+    box.innerHTML = html || '<p class="hint">검색 결과가 없습니다.</p>';
+  }
+  input.addEventListener('input', render);
+  render();
+})();
+</script>
+</body>
+</html>

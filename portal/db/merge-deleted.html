@@ -1,0 +1,585 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>삭제건 복구 MERGE 생성</title>
+<link rel="stylesheet" href="https://cdn.jsdelivr.net/gh/orioncactus/pretendard@v1.3.9/dist/web/static/pretendard.min.css">
+<link rel="stylesheet" href="../assets/portal.css">
+<style>
+  .cols-toolbar { display: flex; justify-content: space-between; align-items: center; gap: 8px; margin: 10px 0 6px; flex-wrap: wrap; }
+  .cols-toolbar .hint { margin: 0; }
+  #colTable td.name { font-family: var(--mono); }
+  #colTable td.type { color: var(--text-3); font-family: var(--mono); font-size: 12px; }
+  .opt-list { display: flex; flex-direction: column; gap: 8px; }
+  .between-only { transition: opacity .15s; }
+  .between-only.disabled { opacity: .4; pointer-events: none; }
+</style>
+</head>
+<body>
+
+<div id="form">
+
+  <!-- 1. 테이블 구조 -->
+  <div class="card">
+    <div class="card-title"><span class="step">1</span>테이블 구조 붙여넣기</div>
+    <div class="field">
+      <textarea id="ddl" rows="8" placeholder="CREATE TABLE 문을 통째로 붙여넣거나,&#10;DB 툴/엑셀에서 복사한 컬럼 목록(한 줄에 하나: 컬럼명 [타입])을 붙여넣으세요.&#10;&#10;예)&#10;ORDER_NO   VARCHAR2(20)  PK&#10;ORDER_SEQ  NUMBER(5)     PK&#10;CUST_ID    VARCHAR2(20)"></textarea>
+      <div class="hint">PRIMARY KEY 구문, 또는 줄 끝의 <span class="mono">PK</span> / <span class="mono">PRI</span> 표시가 있으면 키 컬럼으로 자동 체크됩니다. 로그 테이블 DDL을 붙여넣어도 CRUD·로그일시 컬럼은 자동 제외됩니다.</div>
+    </div>
+    <div class="cols-toolbar">
+      <div class="btn-row">
+        <button type="button" class="btn sm" id="btnSample">예시 채우기</button>
+        <button type="button" class="btn sm" id="btnAllOn">전체 포함</button>
+        <button type="button" class="btn sm" id="btnAllOff">전체 해제</button>
+      </div>
+      <p class="hint" id="colSummary"></p>
+    </div>
+    <div class="table-scroll">
+      <table class="data" id="colTable">
+        <thead><tr><th class="c">포함</th><th class="c">키</th><th>컬럼명</th><th>타입</th></tr></thead>
+        <tbody><tr><td colspan="4" class="hint">위에 구조를 붙여넣으면 컬럼 목록이 표시됩니다.</td></tr></tbody>
+      </table>
+    </div>
+  </div>
+
+  <!-- 2. 대상/로그 설정 -->
+  <div class="card">
+    <div class="card-title"><span class="step">2</span>테이블 · 로그 컬럼</div>
+    <div class="grid c4">
+      <div class="field">
+        <label for="dbms">DBMS</label>
+        <select id="dbms">
+          <option value="oracle">Oracle</option>
+          <option value="mssql">SQL Server</option>
+          <option value="postgres">PostgreSQL (15+)</option>
+          <option value="mysql">MySQL / MariaDB (8.0+)</option>
+        </select>
+      </div>
+      <div class="field">
+        <label for="tbl">원본(복구 대상) 테이블</label>
+        <input type="text" id="tbl" placeholder="예: TB_ORDER">
+      </div>
+      <div class="field">
+        <label for="logTbl">로그 테이블</label>
+        <input type="text" id="logTbl" placeholder="예: TB_ORDER_LOG">
+        <div class="hint">비우면 <span class="mono">원본_LOG</span></div>
+      </div>
+      <div class="field">
+        <label for="extra">추가 조건 (선택)</label>
+        <input type="text" id="extra" placeholder="예: L.COMP_CD = '01'">
+        <div class="hint">로그 테이블 별칭은 <span class="mono">L</span></div>
+      </div>
+      <div class="field">
+        <label for="crudCol">CRUD 컬럼</label>
+        <input type="text" id="crudCol" value="CRUD">
+      </div>
+      <div class="field">
+        <label for="delVal">삭제 값</label>
+        <input type="text" id="delVal" value="D">
+      </div>
+      <div class="field">
+        <label for="dateCol">로그 일시 컬럼</label>
+        <input type="text" id="dateCol" value="LOG_DT">
+      </div>
+      <div class="field">
+        <label for="seqCol">로그 순번 컬럼 (선택)</label>
+        <input type="text" id="seqCol" placeholder="예: LOG_SEQ">
+        <div class="hint">같은 일시에 여러 건일 때 순서 판단용</div>
+      </div>
+    </div>
+  </div>
+
+  <!-- 3. 기간 -->
+  <div class="card">
+    <div class="card-title"><span class="step">3</span>기간</div>
+    <div class="grid c4">
+      <div class="field">
+        <label>조건</label>
+        <div class="seg">
+          <label><input type="radio" name="mode" value="after" checked>이후</label>
+          <label><input type="radio" name="mode" value="between">사이</label>
+        </div>
+      </div>
+      <div class="field">
+        <label for="dFrom">시작 일시 (이상)</label>
+        <input type="datetime-local" id="dFrom" step="1">
+      </div>
+      <div class="field between-only" id="toWrap">
+        <label for="dTo">종료 일시 (이하)</label>
+        <input type="datetime-local" id="dTo" step="1">
+      </div>
+      <div class="field">
+        <label for="dateType">로그 일시 컬럼 형식</label>
+        <select id="dateType">
+          <option value="date">DATE / DATETIME / TIMESTAMP</option>
+          <option value="str14">문자열 YYYYMMDDHH24MISS (14자리)</option>
+          <option value="str8">문자열 YYYYMMDD (8자리)</option>
+          <option value="strdash">문자열 YYYY-MM-DD HH:MI:SS</option>
+        </select>
+      </div>
+    </div>
+  </div>
+
+  <!-- 4. 옵션 -->
+  <div class="card">
+    <div class="card-title"><span class="step">4</span>작업 방식</div>
+    <div class="grid c2">
+      <div class="field">
+        <label for="prep">사전 작업 (테이블 복사)</label>
+        <select id="prep">
+          <option value="backup">원본 백업(구조+데이터) 후 → 원본에 복구</option>
+          <option value="struct">구조만 복사한 새 테이블에 → 삭제건만 적재</option>
+          <option value="none">복사 없이 원본에 바로 복구</option>
+        </select>
+        <div class="hint" id="prepHint"></div>
+      </div>
+      <div class="field" id="copyNameWrap">
+        <label for="copyName">복사 테이블명</label>
+        <input type="text" id="copyName" placeholder="비우면 자동 (원본_BAK_YYYYMMDD)">
+      </div>
+      <div class="opt-list span-all">
+        <label class="check"><input type="checkbox" id="latestOnly" checked>최종 이력이 삭제(D)인 건만 — 삭제 후 다시 등록된 건은 제외</label>
+        <label class="check"><input type="checkbox" id="updMatched">이미 존재하는 키는 로그 값으로 덮어쓰기 (WHEN MATCHED UPDATE)</label>
+        <label class="check"><input type="checkbox" id="withTx" checked>트랜잭션 / COMMIT 안내 포함</label>
+      </div>
+    </div>
+    <div class="btn-row" style="margin-top:14px">
+      <button type="button" class="btn primary" id="btnGen">쿼리 생성</button>
+      <button type="button" class="btn" id="btnReset">입력 초기화</button>
+    </div>
+    <div class="msg" id="msg"></div>
+  </div>
+</div>
+
+<!-- 결과 -->
+<div class="card" id="outCard" style="display:none">
+  <div class="card-title">생성된 쿼리</div>
+  <div class="code-wrap">
+    <button type="button" class="btn sm" id="btnCopy">복사</button>
+    <pre class="code" id="out"></pre>
+  </div>
+</div>
+
+<script src="../assets/menu.js"></script>
+<script src="../assets/layout.js"></script>
+<script>
+(function () {
+  'use strict';
+  var $ = function (id) { return document.getElementById(id); };
+  var esc = Portal.esc;
+  var cols = Portal.store.get('cols', []);   // [{name, type, pk, use}]
+
+  // ================= 컬럼 파싱 =================
+  function stripQuote(n) { return n.replace(/^[`"\[]+|[`"\]]+$/g, ''); }
+  function splitTop(s) {
+    var out = [], depth = 0, cur = '';
+    for (var i = 0; i < s.length; i++) {
+      var ch = s[i];
+      if (ch === '(') depth++;
+      if (ch === ')') depth--;
+      if (ch === ',' && depth === 0) { out.push(cur); cur = ''; } else cur += ch;
+    }
+    if (cur.trim()) out.push(cur);
+    return out;
+  }
+  var SKIP_HEAD = /^(COLUMN_NAME|COLUMN|컬럼명|컬럼|NAME|FIELD|NO|번호)$/i;
+  var CONSTRAINT = /^(CONSTRAINT|PRIMARY|UNIQUE|KEY|INDEX|FOREIGN|CHECK|FULLTEXT|SPATIAL|PERIOD)\b/i;
+
+  function parseColumns(text) {
+    text = text.replace(/--[^\n]*/g, '').replace(/\/\*[\s\S]*?\*\//g, '');
+    var pkSet = {};
+    var pkRe = /PRIMARY\s+KEY\s*(?:CLUSTERED|NONCLUSTERED)?\s*\(([^)]*)\)/gi, m;
+    while ((m = pkRe.exec(text))) {
+      m[1].split(',').forEach(function (c) {
+        var n = stripQuote(c.trim().split(/\s+/)[0]);
+        if (n) pkSet[n.toUpperCase()] = 1;
+      });
+    }
+    var res = [];
+    var ct = text.search(/CREATE\s+(GLOBAL\s+TEMPORARY\s+)?TABLE/i);
+    if (ct > -1 && text.indexOf('(', ct) > -1) {
+      var s = text.indexOf('(', ct), depth = 0, e = -1;
+      for (var i = s; i < text.length; i++) {
+        if (text[i] === '(') depth++;
+        else if (text[i] === ')') { depth--; if (depth === 0) { e = i; break; } }
+      }
+      var body = text.slice(s + 1, e < 0 ? text.length : e);
+      splitTop(body).forEach(function (part) {
+        var p = part.trim();
+        if (!p || CONSTRAINT.test(p)) return;
+        var t = p.match(/^(`[^`]+`|"[^"]+"|\[[^\]]+\]|\S+)\s*([\s\S]*)$/);
+        if (!t) return;
+        var name = stripQuote(t[1]);
+        var rest = t[2] || '';
+        var type = (rest.match(/^[A-Za-z_][\w ]*?(\s*\([^)]*\))?(?=\s|$)/) || [''])[0].trim();
+        res.push({ name: name, type: type, pk: !!pkSet[name.toUpperCase()] || /PRIMARY\s+KEY/i.test(rest) });
+      });
+    } else {
+      var lines = text.split(/\r?\n/).map(function (l) { return l.trim(); }).filter(Boolean);
+      if (lines.length === 1 && lines[0].indexOf(',') > -1) lines = lines[0].split(',').map(function (x) { return x.trim(); });
+      lines.forEach(function (l, li) {
+        var tok = l.split(/\t+|\s+/).map(function (x) { return x.replace(/,$/, ''); }).filter(Boolean);
+        if (!tok.length) return;
+        // "1  ORDER_NO ..." 처럼 순번이 앞에 붙은 경우
+        if (/^\d+$/.test(tok[0]) && tok.length > 1) tok.shift();
+        var name = stripQuote(tok[0]);
+        if (!/^[\w$#가-힣]+$/.test(name) || (li === 0 && SKIP_HEAD.test(name))) return;
+        var flags = tok.slice(1).map(function (x) { return x.toUpperCase(); });
+        var isPk = !!pkSet[name.toUpperCase()] || flags.indexOf('PK') > -1 || flags.indexOf('PRI') > -1;
+        res.push({ name: name, type: tok[1] && !/^(PK|PRI)$/i.test(tok[1]) ? tok[1] : '', pk: isPk });
+      });
+    }
+    // 중복 제거
+    var seen = {};
+    return res.filter(function (c) {
+      var k = c.name.toUpperCase();
+      if (seen[k]) return false;
+      seen[k] = 1; return true;
+    });
+  }
+
+  function logOnlyNames() {
+    return [$('crudCol').value, $('dateCol').value, $('seqCol').value]
+      .map(function (s) { return s.trim().toUpperCase(); }).filter(Boolean);
+  }
+
+  function reparse() {
+    var prev = {};
+    cols.forEach(function (c) { prev[c.name.toUpperCase()] = c; });
+    var logOnly = logOnlyNames();
+    cols = parseColumns($('ddl').value).map(function (c) {
+      var p = prev[c.name.toUpperCase()];
+      if (p) return { name: c.name, type: c.type, pk: p.pk, use: p.use };
+      return { name: c.name, type: c.type, pk: c.pk, use: logOnly.indexOf(c.name.toUpperCase()) < 0 };
+    });
+    renderCols();
+  }
+
+  function renderCols() {
+    var tb = $('colTable').tBodies[0];
+    if (!cols.length) {
+      tb.innerHTML = '<tr><td colspan="4" class="hint">위에 구조를 붙여넣으면 컬럼 목록이 표시됩니다.</td></tr>';
+    } else {
+      tb.innerHTML = cols.map(function (c, i) {
+        return '<tr class="' + (c.use ? '' : 'off') + '">' +
+          '<td class="c"><input type="checkbox" data-i="' + i + '" data-k="use"' + (c.use ? ' checked' : '') + '></td>' +
+          '<td class="c"><input type="checkbox" data-i="' + i + '" data-k="pk"' + (c.pk ? ' checked' : '') + '></td>' +
+          '<td class="name">' + esc(c.name) + '</td><td class="type">' + esc(c.type) + '</td></tr>';
+      }).join('');
+    }
+    var used = cols.filter(function (c) { return c.use; }).length;
+    var pks = cols.filter(function (c) { return c.pk; }).map(function (c) { return c.name; });
+    $('colSummary').innerHTML = cols.length
+      ? '컬럼 ' + cols.length + '개 · 포함 ' + used + '개 · 키: ' + (pks.length ? '<b class="mono">' + esc(pks.join(', ')) + '</b>' : '<span style="color:var(--danger)">미지정</span>')
+      : '';
+    Portal.store.set('cols', cols);
+  }
+
+  $('colTable').addEventListener('change', function (e) {
+    var el = e.target, i = +el.dataset.i, k = el.dataset.k;
+    if (!k) return;
+    cols[i][k] = el.checked;
+    if (k === 'pk' && el.checked) cols[i].use = true;   // 키는 반드시 포함
+    if (k === 'use' && !el.checked) cols[i].pk = false;
+    renderCols();
+  });
+  var t;
+  $('ddl').addEventListener('input', function () { clearTimeout(t); t = setTimeout(reparse, 250); });
+  $('btnAllOn').onclick = function () { cols.forEach(function (c) { c.use = true; }); renderCols(); };
+  $('btnAllOff').onclick = function () { cols.forEach(function (c) { c.use = c.pk; }); renderCols(); };
+
+  // ================= 날짜 =================
+  function pad(n) { return String(n).padStart(2, '0'); }
+  function toLocalInput(d) {
+    return d.getFullYear() + '-' + pad(d.getMonth() + 1) + '-' + pad(d.getDate()) + 'T' + pad(d.getHours()) + ':' + pad(d.getMinutes()) + ':' + pad(d.getSeconds());
+  }
+  function normDt(v) {           // "2026-09-01T00:00(:00)" → "2026-09-01 00:00:00"
+    if (!v) return '';
+    var p = v.replace('T', ' ');
+    if (/^\d{4}-\d{2}-\d{2}$/.test(p)) p += ' 00:00:00';
+    if (/^\d{4}-\d{2}-\d{2} \d{2}:\d{2}$/.test(p)) p += ':00';
+    return p;
+  }
+  function dateLit(v, dbms, type) {
+    var s = normDt(v), digits = s.replace(/\D/g, '');
+    if (type === 'str14') return "'" + digits.slice(0, 14) + "'";
+    if (type === 'str8') return "'" + digits.slice(0, 8) + "'";
+    if (type === 'strdash') return "'" + s + "'";
+    switch (dbms) {
+      case 'oracle': return "TO_DATE('" + s + "', 'YYYY-MM-DD HH24:MI:SS')";
+      case 'mssql': return "CONVERT(DATETIME, '" + s + "', 120)";
+      case 'postgres': return "TIMESTAMP '" + s + "'";
+      default: return "'" + s + "'";
+    }
+  }
+  function ymd() { var d = new Date(); return d.getFullYear() + pad(d.getMonth() + 1) + pad(d.getDate()); }
+
+  // ================= SQL 생성 =================
+  function wrapList(items, indent, width) {
+    width = width || 90;
+    var lines = [], cur = '';
+    items.forEach(function (it, i) {
+      var piece = it + (i < items.length - 1 ? ',' : '');
+      if (cur && (indent + cur + ' ' + piece).length > width) { lines.push(cur); cur = piece; }
+      else cur = cur ? cur + ' ' + piece : piece;
+    });
+    if (cur) lines.push(cur);
+    return lines.join('\n' + indent);
+  }
+  function indentBlock(s, ind) { return s.split('\n').map(function (l) { return l ? ind + l : l; }).join('\n'); }
+
+  function readOpts() {
+    var tbl = $('tbl').value.trim();
+    return {
+      dbms: $('dbms').value,
+      tbl: tbl,
+      logTbl: $('logTbl').value.trim() || (tbl ? tbl + '_LOG' : ''),
+      extra: $('extra').value.trim(),
+      crud: $('crudCol').value.trim(),
+      delVal: $('delVal').value.trim().replace(/'/g, "''"),
+      dateCol: $('dateCol').value.trim(),
+      seqCol: $('seqCol').value.trim(),
+      mode: document.querySelector('input[name=mode]:checked').value,
+      from: $('dFrom').value,
+      to: $('dTo').value,
+      dateType: $('dateType').value,
+      prep: $('prep').value,
+      copyName: $('copyName').value.trim() || (tbl ? tbl + '_BAK_' + ymd() : ''),
+      latestOnly: $('latestOnly').checked,
+      updMatched: $('updMatched').checked,
+      withTx: $('withTx').checked
+    };
+  }
+
+  function validate(o, use, pks) {
+    var e = [];
+    if (!use.length) e.push('포함할 컬럼이 없습니다. 1단계에 테이블 구조를 붙여넣으세요.');
+    if (!pks.length) e.push('키 컬럼을 하나 이상 체크하세요 (MERGE 매칭 기준).');
+    if (!o.tbl) e.push('원본 테이블명을 입력하세요.');
+    if (!o.crud) e.push('CRUD 컬럼명을 입력하세요.');
+    if (!o.dateCol) e.push('로그 일시 컬럼명을 입력하세요.');
+    if (!o.from) e.push('시작 일시를 입력하세요.');
+    if (o.mode === 'between' && !o.to) e.push('종료 일시를 입력하세요.');
+    if (o.mode === 'between' && o.from && o.to && normDt(o.from) > normDt(o.to)) e.push('시작 일시가 종료 일시보다 늦습니다.');
+    if (o.prep !== 'none' && o.copyName.toUpperCase() === o.tbl.toUpperCase()) e.push('복사 테이블명이 원본과 같습니다.');
+    return e;
+  }
+
+  function buildSql(o, use, pks) {
+    var d = o.dbms;
+    var colNames = use.map(function (c) { return c.name; });
+    var nonPk = use.filter(function (c) { return !c.pk; }).map(function (c) { return c.name; });
+    var fromLit = dateLit(o.from, d, o.dateType);
+    var toLit = o.mode === 'between' ? dateLit(o.to, d, o.dateType) : null;
+    var delCond = function (a) { return a + '.' + o.crud + " = '" + o.delVal + "'"; };
+
+    // ---- 원천(로그) 쿼리 ----
+    var inner = [], outer = ['X.RN = 1'];
+    if (o.latestOnly) {
+      // 기간 시작 이후 이력만 모아 PK별 최신 1건 → 그 1건이 D이고 기간 안이면 대상
+      inner.push('L.' + o.dateCol + ' >= ' + fromLit);
+      outer.push(delCond('X'));
+      if (toLit) outer.push('X.' + o.dateCol + ' <= ' + toLit);
+    } else {
+      inner.push(delCond('L'));
+      inner.push('L.' + o.dateCol + ' >= ' + fromLit);
+      if (toLit) inner.push('L.' + o.dateCol + ' <= ' + toLit);
+    }
+    if (o.extra) inner.push('(' + o.extra + ')');
+
+    var orderBy = ['L.' + o.dateCol + ' DESC'];
+    if (o.seqCol) orderBy.push('L.' + o.seqCol + ' DESC');
+
+    var src =
+      'SELECT ' + wrapList(colNames.map(function (c) { return 'X.' + c; }), '       ') + '\n' +
+      '  FROM (\n' +
+      '        SELECT L.*,\n' +
+      '               ROW_NUMBER() OVER (PARTITION BY ' + pks.map(function (p) { return 'L.' + p; }).join(', ') +
+      '\n                                  ORDER BY ' + orderBy.join(', ') + ') AS RN\n' +
+      '          FROM ' + o.logTbl + ' L\n' +
+      '         WHERE ' + inner.join('\n           AND ') + '\n' +
+      '       ) X\n' +
+      ' WHERE ' + outer.join('\n   AND ');
+
+    var target = o.prep === 'struct' ? o.copyName : o.tbl;
+    var out = [];
+    var line = '-- ' + '='.repeat(70);
+
+    out.push(line);
+    out.push('-- 삭제건 복구 쿼리  (' + { oracle: 'Oracle', mssql: 'SQL Server', postgres: 'PostgreSQL', mysql: 'MySQL' }[d] + ')');
+    out.push('-- 원본 : ' + o.tbl + '   로그 : ' + o.logTbl + '   대상 : ' + target);
+    out.push('-- 조건 : ' + o.crud + " = '" + o.delVal + "', " + o.dateCol + ' ' +
+      (toLit ? normDt(o.from) + ' ~ ' + normDt(o.to) : normDt(o.from) + ' 이후'));
+    out.push('-- 키   : ' + pks.join(', ') + (o.latestOnly ? '   (최종 이력이 삭제인 건만)' : ''));
+    out.push(line);
+    out.push('');
+
+    // ---- 1. 대상 확인 ----
+    out.push('-- [1] 복구 대상 건수 확인');
+    out.push('SELECT COUNT(*) AS CNT\n  FROM (\n' + indentBlock(src, '        ') + '\n       ) S;');
+    out.push('');
+    out.push('-- [1-1] 복구 대상 목록 미리보기');
+    out.push(src + '\n ORDER BY ' + pks.map(function (p) { return 'X.' + p; }).join(', ') + ';');
+    out.push('');
+
+    // ---- 2. 테이블 복사 ----
+    if (o.prep === 'backup') {
+      out.push('-- [2] 원본 백업 (구조 + 데이터)');
+      if (d === 'oracle') out.push('CREATE TABLE ' + o.copyName + ' AS SELECT * FROM ' + o.tbl + ';');
+      if (d === 'mssql') out.push('SELECT * INTO ' + o.copyName + ' FROM ' + o.tbl + ';');
+      if (d === 'postgres') out.push('CREATE TABLE ' + o.copyName + ' (LIKE ' + o.tbl + ' INCLUDING ALL);\nINSERT INTO ' + o.copyName + ' SELECT * FROM ' + o.tbl + ';');
+      if (d === 'mysql') out.push('CREATE TABLE ' + o.copyName + ' LIKE ' + o.tbl + ';\nINSERT INTO ' + o.copyName + ' SELECT * FROM ' + o.tbl + ';');
+      out.push('');
+    } else if (o.prep === 'struct') {
+      out.push('-- [2] 구조만 복사 (데이터 없음)');
+      if (d === 'oracle') out.push('CREATE TABLE ' + o.copyName + ' AS SELECT * FROM ' + o.tbl + ' WHERE 1 = 0;\n-- ※ Oracle CTAS는 PK/인덱스가 복사되지 않습니다. 필요 시 별도 생성하세요.');
+      if (d === 'mssql') out.push('SELECT * INTO ' + o.copyName + ' FROM ' + o.tbl + ' WHERE 1 = 0;\n-- ※ SELECT INTO는 PK/인덱스가 복사되지 않습니다.');
+      if (d === 'postgres') out.push('CREATE TABLE ' + o.copyName + ' (LIKE ' + o.tbl + ' INCLUDING ALL);');
+      if (d === 'mysql') out.push('CREATE TABLE ' + o.copyName + ' LIKE ' + o.tbl + ';');
+      out.push('');
+    }
+
+    // ---- 3. 머지 ----
+    var step = o.prep === 'none' ? '[2]' : '[3]';
+    out.push('-- ' + step + ' 삭제건 복구' + (o.updMatched ? ' (존재하는 키는 덮어쓰기)' : ' (없는 키만 INSERT)'));
+    if (o.withTx) {
+      if (d === 'mssql') out.push('BEGIN TRAN;');
+      if (d === 'postgres') out.push('BEGIN;');
+      if (d === 'mysql') out.push('START TRANSACTION;');
+    }
+
+    var srcInd = indentBlock(src, '      ');
+    var onList = pks.map(function (p) { return 'TGT.' + p + ' = SRC.' + p; });
+    var insCols = wrapList(colNames, '              ');
+    var insVals = wrapList(colNames.map(function (c) { return 'SRC.' + c; }), '              ');
+    var doUpd = o.updMatched && nonPk.length;
+    var setList = function (prefix) {
+      return wrapList(nonPk.map(function (c) { return prefix + c + ' = SRC.' + c; }), '                       ');
+    };
+
+    if (d === 'mysql') {
+      var q = 'INSERT INTO ' + target + '\n       (' + wrapList(colNames, '        ') + ')\n' + src;
+      if (doUpd) {
+        q += '\nON DUPLICATE KEY UPDATE\n       ' + wrapList(nonPk.map(function (c) { return c + ' = VALUES(' + c + ')'; }), '       ') + ';';
+        q += '\n-- ※ ON DUPLICATE KEY는 대상 테이블에 PK/UNIQUE 키가 있어야 동작합니다.';
+      } else {
+        q += '\n   AND NOT EXISTS (SELECT 1 FROM ' + target + ' TGT\n                    WHERE ' +
+          pks.map(function (p) { return 'TGT.' + p + ' = X.' + p; }).join('\n                      AND ') + ');';
+      }
+      out.push(q);
+    } else {
+      var asKw = d === 'oracle' ? ' ' : ' AS ';
+      var q2 = 'MERGE INTO ' + target + asKw + 'TGT\nUSING (\n' + srcInd + '\n      )' + asKw + 'SRC\n' +
+        '   ON (' + onList.join('\n       AND ') + ')\n';
+      if (doUpd) {
+        q2 += ' WHEN MATCHED THEN\n      UPDATE SET ' + setList(d === 'postgres' ? '' : 'TGT.') + '\n';
+      }
+      q2 += ' WHEN NOT MATCHED' + (d === 'mssql' ? ' BY TARGET' : '') + ' THEN\n' +
+        '      INSERT (' + insCols + ')\n' +
+        '      VALUES (' + insVals + ');';
+      out.push(q2);
+    }
+
+    if (o.withTx) {
+      out.push('');
+      out.push('-- 결과 건수가 [1]과 같은지 확인 후 반영하세요.');
+      out.push('-- COMMIT;');
+      out.push('-- ROLLBACK;');
+    }
+
+    // ---- 검증 ----
+    out.push('');
+    out.push('-- [검증] 복구 후에도 대상에 없는 키 (0건이어야 정상)');
+    out.push('SELECT COUNT(*) AS MISSING_CNT\n  FROM (\n' + indentBlock(src, '        ') + '\n       ) S\n WHERE NOT EXISTS (SELECT 1 FROM ' + target + ' TGT\n                    WHERE ' +
+      pks.map(function (p) { return 'TGT.' + p + ' = S.' + p; }).join('\n                      AND ') + ');');
+
+    return out.join('\n');
+  }
+
+  function generate() {
+    var o = readOpts();
+    var use = cols.filter(function (c) { return c.use; });
+    var pks = cols.filter(function (c) { return c.pk && c.use; }).map(function (c) { return c.name; });
+    var errs = validate(o, use, pks);
+    var msg = $('msg');
+    if (errs.length) {
+      msg.className = 'msg err';
+      msg.innerHTML = errs.map(esc).join('<br>');
+      $('outCard').style.display = 'none';
+      return;
+    }
+    msg.className = 'msg'; msg.textContent = '';
+    var sql = buildSql(o, use, pks);
+    $('out').innerHTML = Portal.highlightSql(sql);
+    $('out').dataset.raw = sql;
+    $('outCard').style.display = '';
+    $('outCard').scrollIntoView({ behavior: 'smooth', block: 'start' });
+  }
+
+  // ================= UI =================
+  function syncUi() {
+    var between = document.querySelector('input[name=mode]:checked').value === 'between';
+    $('toWrap').classList.toggle('disabled', !between);
+    var prep = $('prep').value;
+    $('copyNameWrap').style.visibility = prep === 'none' ? 'hidden' : 'visible';
+    $('prepHint').textContent = {
+      backup: '원본 전체를 복사해 둔 뒤 원본 테이블에 삭제건을 되살립니다. 문제 시 백업본으로 되돌릴 수 있습니다.',
+      struct: '원본과 같은 구조의 빈 테이블을 만들고 삭제건만 넣습니다. 확인 후 원본 반영은 직접 결정하세요.',
+      none: '원본에 바로 반영합니다. 반드시 [1] 건수를 먼저 확인하세요.'
+    }[prep];
+  }
+  document.querySelectorAll('input[name=mode]').forEach(function (r) { r.addEventListener('change', syncUi); });
+  $('prep').addEventListener('change', syncUi);
+
+  var SAMPLE = [
+    'CREATE TABLE TB_ORDER (',
+    '    ORDER_NO     VARCHAR2(20)   NOT NULL,',
+    '    ORDER_SEQ    NUMBER(5)      NOT NULL,',
+    '    CUST_ID      VARCHAR2(20),',
+    '    ITEM_CD      VARCHAR2(30),',
+    '    QTY          NUMBER(10,2),',
+    '    AMT          NUMBER(15,2),',
+    '    ORDER_DT     DATE,',
+    '    REG_ID       VARCHAR2(20),',
+    '    REG_DT       DATE,',
+    '    CONSTRAINT PK_TB_ORDER PRIMARY KEY (ORDER_NO, ORDER_SEQ)',
+    ');'
+  ].join('\n');
+
+  $('btnSample').onclick = function () {
+    $('ddl').value = SAMPLE;
+    if (!$('tbl').value) $('tbl').value = 'TB_ORDER';
+    if (!$('logTbl').value) $('logTbl').value = 'TB_ORDER_LOG';
+    cols = [];
+    reparse();
+    form.save();
+  };
+
+  function setDefaultDates(force) {
+    var now = new Date();
+    var from = new Date(now.getFullYear(), now.getMonth(), now.getDate() - 7, 0, 0, 0);
+    var to = new Date(now.getFullYear(), now.getMonth(), now.getDate(), 23, 59, 59);
+    if (force || !$('dFrom').value) $('dFrom').value = toLocalInput(from);
+    if (force || !$('dTo').value) $('dTo').value = toLocalInput(to);
+  }
+
+  $('btnReset').onclick = function () {
+    form.clear();
+    Portal.store.set('cols', []);
+    location.reload();
+  };
+  $('btnGen').onclick = generate;
+  $('btnCopy').onclick = function () { Portal.copy($('out').dataset.raw || '', this); };
+  document.addEventListener('keydown', function (e) {
+    if ((e.ctrlKey || e.metaKey) && e.key === 'Enter') generate();
+  });
+
+  var form = Portal.persist($('form'));
+  setDefaultDates(false);
+  syncUi();
+  renderCols();
+})();
+</script>
+</body>
+</html>
