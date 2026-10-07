@@ -158,10 +158,48 @@
     if (line === '') return '';
     return line.split('\n').map(function (l) { return pad + l; }).join('\n');
   }
+  // ================= 인코딩 =================
+  // cmd.exe 는 BOM 을 이해하지 못하고(첫 줄 명령어가 깨짐), CHCP 가 없으면 파일을 시스템 코드페이지(한국어 윈도우: 949)로 읽습니다.
+  // 그래서 기본값은 CP949 바이트로 직접 저장하고, UTF-8 모드는 BOM 없이 CHCP 65001 을 붙여 저장합니다.
+  function getEncoding() { return $('optEncoding').value === 'utf8' ? 'utf8' : 'cp949'; }
+
+  var cp949Table = null;
+  function getCp949Table() {
+    if (cp949Table !== null) return cp949Table;
+    var dec;
+    try { dec = new TextDecoder('euc-kr'); } catch (e) { cp949Table = false; return false; }
+    var map = new Map(), buf = new Uint8Array(2);
+    for (var lead = 0x81; lead <= 0xFE; lead++) {
+      for (var trail = 0x41; trail <= 0xFE; trail++) {
+        buf[0] = lead; buf[1] = trail;
+        var s = dec.decode(buf);
+        if (s.length === 1 && s !== '�' && !map.has(s)) map.set(s, (lead << 8) | trail);
+      }
+    }
+    cp949Table = map;
+    return map;
+  }
+
+  // 반환: { bytes: Uint8Array, bad: [CP949로 표현 못 하는 글자들] } / 브라우저 미지원 시 null
+  function encodeCp949(str) {
+    var out = [], bad = [], table = null;
+    for (var i = 0; i < str.length; i++) {
+      var c = str.charCodeAt(i);
+      if (c < 0x80) { out.push(c); continue; }
+      if (!table) { table = getCp949Table(); if (!table) return null; }
+      var ch = str.charAt(i);
+      if (c >= 0xD800 && c <= 0xDBFF && i + 1 < str.length) { ch = str.substr(i, 2); i++; }
+      var code = table.get(ch);
+      if (code === undefined) { out.push(0x3F); if (bad.indexOf(ch) < 0) bad.push(ch); }
+      else out.push(code >> 8, code & 0xFF);
+    }
+    return { bytes: new Uint8Array(out), bad: bad };
+  }
+
   function generateCode() {
     var lines = [];
     if ($('optEchoOff').checked) lines.push('@ECHO OFF');
-    if ($('optUtf8').checked) lines.push('CHCP 65001 > nul');
+    if (getEncoding() === 'utf8') lines.push('CHCP 65001 > nul');
     lines.push('');
     var body = genList(workspace.blocks, 0);
     if (body) lines.push(body);
@@ -195,6 +233,23 @@
     var code = generateCode();
     $('out').innerHTML = highlightBat(code);
     $('out').dataset.raw = code;
+    updateEncodingWarning(code);
+  }
+  function updateEncodingWarning(code) {
+    var box = $('encWarn');
+    var bad = [];
+    if (getEncoding() === 'cp949') {
+      var r = encodeCp949(code);
+      if (r) bad = r.bad;
+    }
+    if (bad.length) {
+      box.textContent = '⚠ ANSI(CP949)로 저장할 수 없는 글자가 있어 ?로 바뀝니다: ' +
+        bad.slice(0, 10).join(' ') + (bad.length > 10 ? ' …' : '') +
+        '  →  이 글자들이 꼭 필요하면 "한글 저장 방식"을 UTF-8로 바꾸세요.';
+      box.hidden = false;
+    } else {
+      box.hidden = true;
+    }
   }
   function saveAndRender() {
     if (!findListRef(workspace.blocks, activeList)) { activeList = workspace.blocks; activeListLabel = '전체(맨 끝)'; }
@@ -434,9 +489,18 @@
     e.target.value = '';
   };
   $('btnDownload').onclick = function () {
-    var code = $('out').dataset.raw || generateCode();
-    var withBom = $('optUtf8').checked;
-    var blob = new Blob([(withBom ? '\ufeff' : '') + code], { type: 'text/plain' });
+    // \uc904\ubc14\uafc8\uc740 CRLF \ub85c (LF \ub9cc \uc788\uc73c\uba74 GOTO/CALL :\ub77c\ubca8 \uc774 \uac00\ub054 \uc5c9\ub6b1\ud558\uac8c \ub3d9\uc791\ud569\ub2c8\ub2e4)
+    var code = generateCode().replace(/\r?\n/g, '\r\n');
+    var data;
+    if (getEncoding() === 'cp949') {
+      var r = encodeCp949(code);
+      if (!r) { alert('\uc774 \ube0c\ub77c\uc6b0\uc800\ub294 ANSI(CP949) \uc800\uc7a5\uc744 \uc9c0\uc6d0\ud558\uc9c0 \uc54a\uc2b5\ub2c8\ub2e4. "\ud55c\uae00 \uc800\uc7a5 \ubc29\uc2dd"\uc744 UTF-8\ub85c \ubc14\uafd4 \uc8fc\uc138\uc694.'); return; }
+      if (r.bad.length && !confirm('ANSI(CP949)\ub85c \ud45c\ud604\ud560 \uc218 \uc5c6\ub294 \uae00\uc790(' + r.bad.join(' ') + ')\ub294 ?\ub85c \ubc14\ub01d\ub2c8\ub2e4. \uadf8\ub798\ub3c4 \ubc1b\uc744\uae4c\uc694?\n\n\ucde8\uc18c\ud558\uace0 "\ud55c\uae00 \uc800\uc7a5 \ubc29\uc2dd"\uc744 UTF-8\ub85c \ubc14\uafb8\uba74 \uadf8\ub300\ub85c \uc800\uc7a5\ub429\ub2c8\ub2e4.')) return;
+      data = r.bytes;
+    } else {
+      data = code; // UTF-8, BOM \uc5c6\uc774 \uc800\uc7a5 (BOM \uc774 \uc788\uc73c\uba74 cmd \uac00 \uccab \uc904\uc744 \uba85\ub839\uc5b4\ub85c \uc778\uc2dd\ud558\uc9c0 \ubabb\ud568)
+    }
+    var blob = new Blob([data], { type: 'application/octet-stream' });
     var a = document.createElement('a'); a.href = URL.createObjectURL(blob);
     var name = $('bbFilename').value.trim() || 'run.bat';
     if (!/\.(bat|cmd)$/i.test(name)) name += '.bat';
@@ -450,6 +514,9 @@
   // ================= 시작 =================
   if (!$('bbFilename').value) $('bbFilename').value = 'run.bat';
   Portal.persist(document.getElementById('toolbarForm'));
+  // 저장 방식은 따로도 기억해 둡니다 (Portal.persist 가 select 를 다루지 않는 경우 대비)
+  $('optEncoding').value = Portal.store.get('encoding', 'cp949') === 'utf8' ? 'utf8' : 'cp949';
+  $('optEncoding').addEventListener('change', function () { Portal.store.set('encoding', getEncoding()); });
   renderPalette();
   saveAndRender();
 })();
