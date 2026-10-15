@@ -55,6 +55,19 @@ window.PORTAL_MENU = {
           tags: ['batch', 'bat', '스크래치', 'scratch', '블록', '자동화', '스크립트', 'cmd']
         }
       ]
+    },
+    {
+      id: 'etc',
+      name: '기타 업무',
+      desc: '이미지 · 기타 반복 작업',
+      items: [
+        {
+          file: 'etc/image-eraser.html',
+          name: '이미지 지우개',
+          desc: '이미지에서 필요 없는 부분을 AI 클릭 선택이나 브러시로 고르면 주변과 어울리게 지워 줍니다. 모든 처리는 브라우저 안에서만 합니다.',
+          tags: ['이미지', '지우개', '사진', '인페인팅', 'inpaint', 'AI', '마스킹', 'mask', '누끼', '워터마크']
+        }
+      ]
     }
     /*
     , {
