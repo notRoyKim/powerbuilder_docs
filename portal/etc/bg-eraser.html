@@ -1,0 +1,120 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>배경 지우개</title>
+<link rel="stylesheet" href="https://cdn.jsdelivr.net/gh/orioncactus/pretendard@v1.3.9/dist/web/static/pretendard.min.css">
+<link rel="stylesheet" href="../assets/portal.css">
+<style>
+  /* 배경 지우개 전용 (접두어 ie-, 스크립트는 image-eraser.js 공용) */
+  .card-title .spacer { flex: 1; }
+  .ie-drop {
+    display: flex; flex-direction: column; align-items: center; gap: 6px;
+    padding: 56px 16px; text-align: center; cursor: pointer;
+    border: 2px dashed var(--border); border-radius: var(--radius);
+    background: var(--surface-2); color: var(--text-2);
+  }
+  .ie-drop[hidden] { display: none; }
+  .ie-drop strong { color: var(--text); font-size: 15px; }
+  .ie-drop small { color: var(--text-3); }
+  .ie-drop:hover, .ie-drop:focus-visible, .ie-over .ie-drop { border-color: var(--accent); background: var(--accent-weak); outline: none; }
+  .ie-over .ie-wrap { outline: 2px dashed var(--accent); outline-offset: 4px; }
+
+  .ie-bar { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; scroll-margin-top: calc(var(--gnb-h, 52px) + 12px); }
+  .ie-bar .spacer { flex: 1; }
+  .ie-size { display: inline-flex; align-items: center; gap: 6px; font-size: 13px; color: var(--text-2); }
+  .ie-size input[type="range"] { width: 120px; }
+  .ie-size > span[id] { min-width: 2.2em; font-family: var(--mono); }
+  #ieHint { margin-top: 8px; }
+
+  .ie-stage { display: flex; justify-content: center; margin-top: 10px; }
+  .ie-wrap {
+    position: relative; touch-action: none; user-select: none;
+    background-color: var(--surface);
+    background-image: conic-gradient(var(--surface-2) 25%, transparent 0 50%, var(--surface-2) 0 75%, transparent 0);
+    background-size: 16px 16px;
+  }
+  .ie-wrap canvas { position: absolute; inset: 0; width: 100%; height: 100%; display: block; }
+  #ieImg { opacity: .25; }            /* 지워진 부분은 흐린 원본으로만 보임 */
+  #ieMask { opacity: 0; cursor: none; } /* 남길 부분 마스크는 숨기고 결과(#ieView)로 보여 줌 */
+  .ie-wrap.ie-pick #ieMask { cursor: crosshair; }
+  .ie-cursor {
+    position: absolute; display: none; pointer-events: none; border-radius: 50%;
+    border: 1.5px solid var(--surface); box-shadow: 0 0 0 1px var(--text);
+  }
+  .ie-busy {
+    position: absolute; inset: 0; display: flex; align-items: center; justify-content: center;
+    background: color-mix(in srgb, var(--bg) 55%, transparent); cursor: progress;
+  }
+  .ie-busy[hidden] { display: none; }
+  .ie-busy span {
+    display: inline-flex; align-items: center; gap: 8px; max-width: 90%;
+    padding: 8px 14px; font-size: 13px; color: var(--text);
+    background: var(--surface); border: 1px solid var(--border); border-radius: var(--radius);
+  }
+  .ie-busy span::before {
+    content: ''; flex: none; width: 14px; height: 14px; border-radius: 50%;
+    border: 2px solid var(--border); border-top-color: var(--accent); animation: ie-spin .8s linear infinite;
+  }
+  @keyframes ie-spin { to { transform: rotate(360deg); } }
+  #msg { margin-top: 10px; }
+</style>
+</head>
+<body>
+
+<div class="card" id="ieCard" data-mode="bg">
+  <div class="card-title">이미지<span class="spacer"></span><button type="button" class="btn sm" id="ieOpen" hidden>다른 이미지</button></div>
+
+  <div class="ie-drop" id="ieEmpty" tabindex="0" role="button">
+    <strong>이미지를 끌어다 놓거나, 여기를 눌러 고르세요</strong>
+    <span>화면 캡처는 Ctrl+V로 바로 붙여넣을 수 있습니다.</span>
+    <small>사진은 [AI 선택]으로 남길 물체를 클릭, 흰 바탕의 도장·서명·로고는 [색으로 지우기]로 바탕을 클릭하세요.</small>
+    <small>모든 처리는 이 브라우저 안에서만 합니다. AI 기능은 처음 쓸 때 모델을 한 번 받아 둡니다.</small>
+  </div>
+
+  <div id="ieEditor" hidden>
+    <div class="ie-bar" id="ieTools">
+      <div class="seg">
+        <label><input type="radio" name="ieTool" value="ai" checked>AI 선택</label>
+        <label><input type="radio" name="ieTool" value="color">색으로 지우기</label>
+        <label><input type="radio" name="ieTool" value="erase">지우개</label>
+        <label><input type="radio" name="ieTool" value="brush">되살리기</label>
+      </div>
+      <label class="ie-size" id="ieSizeBox" for="ieSize">굵기 <input type="range" id="ieSize" min="4" max="200" value="40"><span id="ieSizeVal">40</span></label>
+      <span class="ie-size" id="ieTolBox">
+        <label for="ieTol">허용</label><input type="range" id="ieTol" min="1" max="100" value="30" style="width:90px"><span id="ieTolVal">30</span>
+        <span class="seg">
+          <label><input type="radio" name="ieScope" value="near" checked>이어진 부분</label>
+          <label><input type="radio" name="ieScope" value="all">같은 색 전체</label>
+        </span>
+      </span>
+      <button type="button" class="btn sm" id="ieUndo">되돌리기</button>
+      <button type="button" class="btn sm" id="ieClear">처음으로</button>
+      <span class="spacer"></span>
+      <button type="button" class="btn primary" id="ieSave">PNG 저장</button>
+      <button type="button" class="btn" id="ieCopy">복사</button>
+    </div>
+    <div class="hint" id="ieHint"></div>
+
+    <div class="ie-stage" id="ieStage">
+      <div class="ie-wrap" id="ieWrap">
+        <canvas id="ieImg"></canvas>
+        <canvas id="ieView"></canvas>
+        <canvas id="ieMask"></canvas>
+        <div class="ie-cursor" id="ieCursor"></div>
+        <div class="ie-busy" id="ieBusy" hidden><span id="ieBusyText"></span></div>
+      </div>
+    </div>
+  </div>
+
+  <div class="msg" id="msg"></div>
+</div>
+
+<input type="file" id="ieFile" accept="image/*" hidden>
+
+<script src="../assets/menu.js"></script>
+<script src="../assets/layout.js"></script>
+<script src="image-eraser.js"></script>
+</body>
+</html>

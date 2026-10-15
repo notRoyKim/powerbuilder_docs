@@ -1,7 +1,9 @@
-/* 이미지 지우개 (portal/etc/image-eraser.html)
+/* 이미지 지우개·배경 지우개 공용 (portal/etc/image-eraser.html, portal/etc/bg-eraser.html)
+ * - 이미지 지우개: 고른 부분(마스크)을 주변과 어울리게 채운다.
+ * - 배경 지우개(#ieCard data-mode="bg"): 마스크 = 남길 부분. 나머지를 투명하게 해 PNG로 내보낸다.
  * - 이미지는 어디로도 보내지 않는다. 모든 처리는 이 브라우저 안에서만.
  * - AI 선택(SlimSAM)·AI 지우기(MI-GAN)는 처음 쓸 때만 엔진과 모델을 인터넷에서 받아 브라우저에 보관한다.
- *   받지 못하면 선택은 브러시로, 지우기는 기본 방식(주변 무늬를 옮겨 와 채우기)으로 동작한다.
+ *   받지 못하면 선택은 브러시(배경 지우개는 색으로 지우기도)로, 지우기는 기본 방식(주변 무늬를 옮겨 와 채우기)으로 동작한다.
  */
 (function () {
   'use strict';
@@ -18,7 +20,13 @@
   var CACHE = 'portal-image-eraser-v1';   // 받은 모델 보관 (Cache Storage)
   var MAX_PX = 16e6;                      // 이보다 큰 이미지는 줄여서 연다
   var UNDO_MAX = 30, UNDO_BYTES = 300e6;
-  var HINT = {
+  var BG = $('ieCard').getAttribute('data-mode') === 'bg';
+  var HINT = BG ? {
+    ai: '남길 물체를 클릭하면 나머지가 투명해집니다. 더 클릭하면 함께 남고, Shift+클릭(또는 오른쪽 클릭)은 그 부분을 투명하게.',
+    color: '배경을 클릭하면 비슷한 색이 투명해집니다. 도장·서명처럼 글자 안쪽까지 지우려면 "같은 색 전체". Shift+클릭은 되살리기.',
+    erase: '투명하게 할 부분을 문지르세요.',
+    brush: '흐리게 보이는 지워진 부분을 칠해 되살립니다.'
+  } : {
     ai: '지울 물체를 클릭하면 AI가 그 물체를 골라 줍니다. Shift+클릭(또는 오른쪽 클릭)은 선택에서 빼기.',
     brush: '지울 부분을 칠하세요.',
     erase: '칠한 선택을 문질러 덜어냅니다.'
@@ -32,6 +40,8 @@
   var imgVer = 0, undoStack = [], busy = false, stroke = null, emb = null;
   var maskRGB = [229, 72, 77];
   var miganFail = null; // AI 지우기를 못 쓰게 된 사유 (새로고침 전까지 기본 방식 사용)
+  // 배경 지우개 전용: 결과 미리보기(이미지 ∩ 남길 부분), 아직 손대지 않은 상태인지, 원본 픽셀 캐시
+  var viewCv = $('ieView'), viewCtx = viewCv ? viewCv.getContext('2d') : null, viewQ = false, bgFresh = false, pixCache = null;
 
   // ---------- 공통 ----------
   function msg(kind, text) { var m = $('msg'); m.className = text ? 'msg ' + kind : 'msg'; m.textContent = text || ''; }
@@ -44,15 +54,16 @@
   function brushPx() { return +$('ieSize').value || 40; }
 
   function syncTool() {
-    var t = tool();
+    var t = tool(), pick = t === 'ai' || t === 'color';
     $('ieHint').textContent = HINT[t] + ' · Ctrl+Z 되돌리기';
     $('ieSizeVal').textContent = brushPx();
-    $('ieSizeBox').style.visibility = t === 'ai' ? 'hidden' : '';
-    wrap.classList.toggle('ie-ai', t === 'ai');
+    $('ieSizeBox').style.display = pick ? 'none' : '';
+    if ($('ieTolBox')) { $('ieTolBox').style.display = t === 'color' ? '' : 'none'; $('ieTolVal').textContent = $('ieTol').value; }
+    wrap.classList.toggle('ie-pick', pick);
   }
   function syncButtons() {
     $('ieUndo').disabled = busy || !undoStack.length;
-    ['ieClear', 'ieRun', 'ieSave', 'ieCopy', 'ieOpen'].forEach(function (id) { $(id).disabled = busy || !W; });
+    ['ieClear', 'ieRun', 'ieSave', 'ieCopy', 'ieOpen'].forEach(function (id) { var b = $(id); if (b) b.disabled = busy || !W; });
   }
   function readMaskColor() { // 선택 표시 색 = --danger 토큰 (형식에 상관없이 RGB로 풀기)
     var c = document.createElement('canvas'); c.width = c.height = 1;
@@ -87,11 +98,13 @@
       note = '이미지가 커서 ' + ow + '×' + oh + ' → ' + w + '×' + h + '로 줄여서 열었습니다.';
     }
     W = w; H = h;
-    [imgCv, maskCv, prevCv].forEach(function (c) { c.width = W; c.height = H; });
+    [imgCv, maskCv, prevCv, viewCv].forEach(function (c) { if (c) { c.width = W; c.height = H; } });
     imgCtx.imageSmoothingQuality = 'high';
     imgCtx.drawImage(im, 0, 0, W, H);
-    undoStack = []; imgVer++; emb = null; stroke = null;
+    undoStack = []; imgVer++; emb = null; stroke = null; pixCache = null;
     readMaskColor();
+    if (BG) { fullKeep(); bgFresh = true; }
+    renderView();
     $('ieEmpty').hidden = true; $('ieEditor').hidden = false; $('ieOpen').hidden = false;
     fit(); syncButtons();
     msg(note ? 'ok' : '', note);
@@ -113,7 +126,8 @@
     return { x: (e.clientX - r.left) * W / r.width, y: (e.clientY - r.top) * H / r.height, k: W / r.width };
   }
   function moveCursor(e) {
-    if (!W || tool() === 'ai') { cursor.style.display = 'none'; return; }
+    var t = tool();
+    if (!W || t === 'ai' || t === 'color') { cursor.style.display = 'none'; return; }
     var r = wrap.getBoundingClientRect(), d = brushPx();
     cursor.style.display = 'block';
     cursor.style.width = cursor.style.height = d + 'px';
@@ -133,6 +147,7 @@
     c.restore();
     bx[0] = Math.min(bx[0], b.x); bx[1] = Math.min(bx[1], b.y);
     bx[2] = Math.max(bx[2], b.x); bx[3] = Math.max(bx[3], b.y);
+    if (BG) queueView();
   }
   function endStroke() {
     if (!stroke) return;
@@ -143,8 +158,12 @@
   maskCv.addEventListener('pointerdown', function (e) {
     if (!W || busy) return;
     var p = pt(e), t = tool();
-    if (t === 'ai') {
-      if (e.button === 0 || e.button === 2) { e.preventDefault(); aiSelect(p, e.button === 2 || e.shiftKey || e.altKey); }
+    if (t === 'ai' || t === 'color') {
+      if (e.button === 0 || e.button === 2) {
+        e.preventDefault();
+        var alt = e.button === 2 || e.shiftKey || e.altKey;
+        if (t === 'ai') aiSelect(p, alt); else colorPick(p, alt);
+      }
       return;
     }
     if (e.button !== 0) return;
@@ -171,20 +190,29 @@
     var x1 = Math.min(W, Math.ceil(b[2])), y1 = Math.min(H, Math.ceil(b[3]));
     return x1 > x0 && y1 > y0 ? { x: x0, y: y0, w: x1 - x0, h: y1 - y0 } : null;
   }
-  // 바뀐 범위만 0/255로 정리해 확정하고, 바뀌기 전 모습을 되돌리기에 쌓는다
+  // 바뀐 범위를 확정하고, 바뀌기 전 모습을 되돌리기에 쌓는다
+  // 이미지 지우개는 0/255로 정리(보이는 그대로 지워지게), 배경 지우개는 부드러운 가장자리를 그대로 둔다
   function commitMask(box) {
-    var r = rectOf(box); if (!r) return;
+    var r = rectOf(box), i;
+    if (!r) { renderView(); return; }
     var before = prevCtx.getImageData(r.x, r.y, r.w, r.h), bd = before.data;
     var cur = maskCtx.getImageData(r.x, r.y, r.w, r.h), d = cur.data, changed = false;
-    for (var i = 0; i < d.length; i += 4) {
-      var on = d[i + 3] >= 128 ? 255 : 0;  // 흐린 가장자리 정리 → 보이는 그대로 지워짐
-      d[i] = maskRGB[0]; d[i + 1] = maskRGB[1]; d[i + 2] = maskRGB[2]; d[i + 3] = on;
-      if (on !== bd[i + 3]) changed = true;
+    if (BG) {
+      for (i = 3; i < d.length; i += 4) if (d[i] !== bd[i]) { changed = true; break; }
+    } else {
+      for (i = 0; i < d.length; i += 4) {
+        var on = d[i + 3] >= 128 ? 255 : 0;
+        d[i] = maskRGB[0]; d[i + 1] = maskRGB[1]; d[i + 2] = maskRGB[2]; d[i + 3] = on;
+        if (on !== bd[i + 3]) changed = true;
+      }
+      maskCtx.putImageData(cur, r.x, r.y);
     }
-    maskCtx.putImageData(cur, r.x, r.y);
-    if (!changed) return;
-    prevCtx.putImageData(cur, r.x, r.y);
-    pushUndo({ x: r.x, y: r.y, mask: before });
+    if (changed) {
+      prevCtx.putImageData(cur, r.x, r.y);
+      pushUndo({ x: r.x, y: r.y, mask: before, fresh: bgFresh });
+      bgFresh = false;
+    }
+    renderView();
   }
   function undoBytes(u) { return (u.mask ? u.mask.data.length : 0) + (u.img ? u.img.data.length : 0); }
   function pushUndo(u) {
@@ -198,7 +226,8 @@
     var u = undoStack.pop(); if (!u) return;
     if (u.img) { imgCtx.putImageData(u.img, u.x, u.y); imgVer++; }
     if (u.mask) { maskCtx.putImageData(u.mask, u.x, u.y); prevCtx.putImageData(u.mask, u.x, u.y); }
-    msg('', ''); syncButtons();
+    if (u.fresh !== undefined) bgFresh = u.fresh;
+    renderView(); msg('', ''); syncButtons();
   }
   function holeBox() { // 선택된 부분의 범위 (없으면 null)
     var d = maskCtx.getImageData(0, 0, W, H).data, x0 = W, y0 = H, x1 = -1, y1 = -1;
@@ -211,11 +240,89 @@
   }
   function clearSel() {
     if (!W || busy) return;
+    if (BG) { // 배경 지우개의 [처음으로]: 전부 다시 남기기
+      if (bgFresh) return;
+      var all = prevCtx.getImageData(0, 0, W, H);
+      fullKeep();
+      pushUndo({ x: 0, y: 0, mask: all, fresh: false });
+      bgFresh = true; renderView(); msg('', '');
+      return;
+    }
     var b = holeBox(); if (!b) return;
     var before = prevCtx.getImageData(b.x, b.y, b.w, b.h);
     maskCtx.clearRect(b.x, b.y, b.w, b.h); prevCtx.clearRect(b.x, b.y, b.w, b.h);
     pushUndo({ x: b.x, y: b.y, mask: before });
     msg('', '');
+  }
+
+  // ---------- 배경 지우개: 남길 부분·미리보기·색으로 지우기 ----------
+  function fullKeep() {
+    maskCtx.save(); maskCtx.globalCompositeOperation = 'source-over';
+    maskCtx.fillStyle = maskCss(); maskCtx.fillRect(0, 0, W, H); maskCtx.restore();
+    prevCtx.clearRect(0, 0, W, H); prevCtx.drawImage(maskCv, 0, 0);
+  }
+  function renderView() { // 결과 = 이미지 ∩ 남길 부분 (지워진 곳은 아래에 흐린 원본 + 체크무늬)
+    if (!viewCtx || !W) return;
+    viewCtx.save();
+    viewCtx.globalCompositeOperation = 'copy';
+    viewCtx.drawImage(imgCv, 0, 0);
+    viewCtx.globalCompositeOperation = 'destination-in';
+    viewCtx.drawImage(maskCv, 0, 0);
+    viewCtx.restore();
+  }
+  function queueView() { // 브러시로 칠하는 동안은 화면 그리는 때에 맞춰 한 번씩만
+    if (!viewCtx || viewQ) return;
+    viewQ = true;
+    requestAnimationFrame(function () { viewQ = false; renderView(); });
+  }
+  function imgPixels() {
+    if (!pixCache || pixCache.ver !== imgVer) pixCache = { ver: imgVer, data: imgCtx.getImageData(0, 0, W, H).data };
+    return pixCache.data;
+  }
+  // 클릭한 곳의 색과 비슷한 부분을 투명하게 (restore면 되살리기)
+  function colorPick(p, restore) {
+    var cx = Math.floor(p.x), cy = Math.floor(p.y), x, y, i;
+    if (cx < 0 || cy < 0 || cx >= W || cy >= H) return;
+    msg('', '');
+    var sc = document.querySelector('input[name="ieScope"]:checked');
+    var d = imgPixels(), th = (+$('ieTol').value || 30) * 2.2, th2 = th * th, whole = sc && sc.value === 'all';
+    var r = 0, g = 0, b = 0, k = 0;
+    for (y = Math.max(0, cy - 1); y <= Math.min(H - 1, cy + 1); y++) {
+      for (x = Math.max(0, cx - 1); x <= Math.min(W - 1, cx + 1); x++) { i = (y * W + x) * 4; r += d[i]; g += d[i + 1]; b += d[i + 2]; k++; }
+    }
+    r /= k; g /= k; b /= k;
+    var n = W * H, sel = new Uint8Array(n), x0 = W, y0 = H, x1 = -1, y1 = -1;
+    var near = function (j) { var q = j * 4, dr = d[q] - r, dg = d[q + 1] - g, db = d[q + 2] - b; return dr * dr + dg * dg + db * db <= th2; };
+    var mark = function (j) {
+      sel[j] = 1;
+      var xx = j % W, yy = (j - xx) / W;
+      if (xx < x0) x0 = xx; if (xx > x1) x1 = xx; if (yy < y0) y0 = yy; if (yy > y1) y1 = yy;
+    };
+    if (whole) {
+      for (i = 0; i < n; i++) if (near(i)) mark(i);
+    } else { // 클릭한 곳에서 이어진 부분만 (4방향 채우기)
+      var q = new Int32Array(n), head = 0, tail = 0, s = cy * W + cx;
+      mark(s); q[tail++] = s;
+      while (head < tail) {
+        var j = q[head++], jx = j % W;
+        if (jx > 0 && !sel[j - 1] && near(j - 1)) { mark(j - 1); q[tail++] = j - 1; }
+        if (jx < W - 1 && !sel[j + 1] && near(j + 1)) { mark(j + 1); q[tail++] = j + 1; }
+        if (j >= W && !sel[j - W] && near(j - W)) { mark(j - W); q[tail++] = j - W; }
+        if (j + W < n && !sel[j + W] && near(j + W)) { mark(j + W); q[tail++] = j + W; }
+      }
+    }
+    if (x1 < 0) return;
+    var rc = rectOf([x0, y0, x1 + 1, y1 + 1]), md = maskCtx.getImageData(rc.x, rc.y, rc.w, rc.h), mdd = md.data;
+    for (y = 0; y < rc.h; y++) {
+      for (x = 0; x < rc.w; x++) {
+        if (!sel[(y + rc.y) * W + x + rc.x]) continue;
+        i = (y * rc.w + x) * 4;
+        if (restore) { mdd[i] = maskRGB[0]; mdd[i + 1] = maskRGB[1]; mdd[i + 2] = maskRGB[2]; mdd[i + 3] = 255; }
+        else mdd[i + 3] = 0;
+      }
+    }
+    maskCtx.putImageData(md, rc.x, rc.y);
+    commitMask([rc.x, rc.y, rc.x + rc.w, rc.y + rc.h]);
   }
 
   // ---------- AI 엔진·모델 ----------
@@ -369,22 +476,24 @@
       }
     }
     if (x1 < 0) return false;
-    var R = 3; // 그림자·테두리까지 지우도록 가장자리를 조금 넓힘
-    bin = dilate(bin, rw, rh, R);
+    var R = BG ? 0 : 3; // 이미지 지우개: 그림자·테두리까지 지우도록 가장자리를 조금 넓힘
+    if (R) bin = dilate(bin, rw, rh, R);
     var c = document.createElement('canvas'); c.width = rw; c.height = rh;
     var cx = c.getContext('2d'), id = cx.createImageData(rw, rh), d = id.data;
     for (var i = 0; i < bin.length; i++) {
       if (bin[i]) { d[i * 4] = maskRGB[0]; d[i * 4 + 1] = maskRGB[1]; d[i * 4 + 2] = maskRGB[2]; d[i * 4 + 3] = 255; }
     }
     cx.putImageData(id, 0, 0);
+    var kx = W / rw, ky = H / rh;
+    var box = [(x0 - R - 1) * kx, (y0 - R - 1) * ky, (x1 + R + 2) * kx, (y1 + R + 2) * ky];
     maskCtx.save();
+    if (BG && bgFresh && !minus) { maskCtx.clearRect(0, 0, W, H); box = [0, 0, W, H]; } // 배경 지우개 첫 클릭: 이 물체만 남기기
     maskCtx.globalCompositeOperation = minus ? 'destination-out' : 'source-over';
     maskCtx.imageSmoothingEnabled = true;
     maskCtx.drawImage(c, 0, 0, rw, rh, 0, 0, W, H);
-    if (minus) maskCtx.drawImage(c, 0, 0, rw, rh, 0, 0, W, H); // 빼기는 반쯤 걸친 가장자리까지 확실히
+    if (minus && !BG) maskCtx.drawImage(c, 0, 0, rw, rh, 0, 0, W, H); // 빼기는 반쯤 걸친 가장자리까지 확실히
     maskCtx.restore();
-    var kx = W / rw, ky = H / rh;
-    commitMask([(x0 - R - 1) * kx, (y0 - R - 1) * ky, (x1 + R + 2) * kx, (y1 + R + 2) * ky]);
+    commitMask(box);
     return true;
   }
   function dilate(a, w, h, r) { // 정사각형 팽창 (가로 → 세로)
@@ -686,13 +795,14 @@
   }
 
   // ---------- 저장·복사 ----------
+  function output() { if (BG) { renderView(); return viewCv; } return imgCv; } // 배경 지우개는 투명 결과
   function save() {
     if (!W || busy) return;
-    var type = srcType, ext = type === 'image/jpeg' ? 'jpg' : type === 'image/webp' ? 'webp' : 'png';
-    imgCv.toBlob(function (b) {
+    var type = BG ? 'image/png' : srcType, ext = type === 'image/jpeg' ? 'jpg' : type === 'image/webp' ? 'webp' : 'png';
+    output().toBlob(function (b) {
       if (!b) { msg('err', '저장 파일을 만들지 못했습니다.'); return; }
       var a = document.createElement('a');
-      a.href = URL.createObjectURL(b); a.download = srcName + '_지움.' + ext;
+      a.href = URL.createObjectURL(b); a.download = srcName + (BG ? '_투명.' : '_지움.') + ext;
       document.body.appendChild(a); a.click();
       setTimeout(function () { URL.revokeObjectURL(a.href); a.remove(); }, 500);
     }, type, 0.92);
@@ -702,7 +812,7 @@
     if (!navigator.clipboard || !navigator.clipboard.write || !window.ClipboardItem) {
       msg('err', '이 브라우저에서는 이미지 복사를 할 수 없습니다. [저장]을 이용하세요.'); return;
     }
-    var blob = new Promise(function (ok, no) { imgCv.toBlob(function (b) { if (b) ok(b); else no(new Error('blob')); }, 'image/png'); });
+    var src = output(), blob = new Promise(function (ok, no) { src.toBlob(function (b) { if (b) ok(b); else no(new Error('blob')); }, 'image/png'); });
     navigator.clipboard.write([new window.ClipboardItem({ 'image/png': blob })]).then(function () {
       btn.textContent = '복사됨';
       setTimeout(function () { btn.textContent = '복사'; }, 1200);
@@ -739,9 +849,10 @@
 
   $('ieTools').addEventListener('change', syncTool);
   $('ieSize').addEventListener('input', function () { $('ieSizeVal').textContent = brushPx(); });
+  if ($('ieTol')) $('ieTol').addEventListener('input', function () { $('ieTolVal').textContent = this.value; });
   $('ieUndo').addEventListener('click', undo);
   $('ieClear').addEventListener('click', clearSel);
-  $('ieRun').addEventListener('click', runErase);
+  if ($('ieRun')) $('ieRun').addEventListener('click', runErase);
   $('ieSave').addEventListener('click', save);
   $('ieCopy').addEventListener('click', function () { copyImg(this); });
   window.addEventListener('resize', fit);
