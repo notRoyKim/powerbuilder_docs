@@ -51,8 +51,8 @@ window.PORTAL_MENU = {
         {
           file: 'auto/batch-builder.html',
           name: '배치파일 블록 조립기',
-          desc: '스크래치처럼 블록을 클릭·드래그로 쌓아서 Windows 배치파일(.bat)을 만듭니다. 폴더 정리, 파일 백업, 반복 실행 같은 작업을 코드 없이 조립할 수 있습니다.',
-          tags: ['batch', 'bat', '스크래치', 'scratch', '블록', '자동화', '스크립트', 'cmd']
+          desc: '스크래치처럼 블록을 클릭·드래그로 쌓아서 Windows 배치파일(.bat)을 만듭니다. 가지고 있는 .bat 를 넣으면 블록으로 바꿔 주고, 블록으로 못 바꾼 부분은 따로 모아 질문할 수 있습니다.',
+          tags: ['batch', 'bat', '스크래치', 'scratch', '블록', '자동화', '스크립트', 'cmd', '가져오기', '변환', 'import']
         }
       ]
     },

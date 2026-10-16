@@ -115,6 +115,20 @@
   .bb-issues li.warn { color:var(--text-2); }
   .bb-note { font-size:12px; color:var(--text-2); background:var(--surface-2); border-radius:6px; padding:8px 10px; margin:10px 0 0; }
   .bb-hint2 { font-size:12px; color:var(--text-3); margin:10px 0 0; }
+  .card-title .spacer { flex:1; }
+  .msg.info { background:var(--accent-weak); color:var(--text); }
+
+  /* 가져오기 · 질문 창 */
+  .bb-import-src { min-height:180px; }
+  .bb-import-src.drop-file { border-color:var(--accent); box-shadow:0 0 0 3px var(--accent-weak); }
+  .blk-src { font-size:10.5px; font-weight:600; background:rgba(0,0,0,.22); border-radius:9px; padding:0 7px; line-height:1.75; cursor:help; }
+  .bb-ask { margin-top:16px; }
+  .bb-ask-intro { margin:-4px 0 12px; }
+  .bb-ask textarea { min-height:0; font-family:var(--font); }
+  .ask-item { border:1px solid var(--border); border-radius:6px; margin-bottom:8px; overflow:hidden; }
+  .ask-head { display:flex; align-items:center; gap:10px; flex-wrap:wrap; padding:6px 10px; background:var(--surface-2); font-size:12.5px; }
+  .ask-meta { flex:1; color:var(--text-2); min-width:0; }
+  .ask-code { margin:0; padding:8px 12px; font:12px/1.55 var(--mono); background:var(--surface); color:var(--text); white-space:pre; overflow:auto; max-height:220px; }
 </style>
 </head>
 <body>
@@ -150,6 +164,7 @@
       <button type="button" class="btn" id="btnUndo" title="Ctrl+Z">↶ 되돌리기</button>
       <button type="button" class="btn" id="btnRedo" title="Ctrl+Y">↷ 다시 하기</button>
       <span class="sep"></span>
+      <button type="button" class="btn" id="btnImportBat">⇪ 배치 코드 가져오기</button>
       <button type="button" class="btn" id="btnReset">새로 만들기</button>
       <button type="button" class="btn" id="btnExport">JSON 내보내기</button>
       <button type="button" class="btn" id="btnImportTrigger">JSON 가져오기</button>
@@ -157,6 +172,19 @@
       <button type="button" class="btn primary" id="btnDownload">.bat 파일 받기</button>
     </div>
     <p class="bb-warn">⚠ 삭제 블록(파일 삭제·폴더 삭제·오래된 파일 삭제)은 되돌릴 수 없습니다. 실행 전에 오른쪽 코드를 꼭 확인하세요.</p>
+  </div>
+
+  <div class="card bb-import" id="bbImport" hidden>
+    <div class="card-title">가지고 있는 배치 코드를 블록으로 바꾸기<span class="spacer"></span><button type="button" class="btn sm" id="btnImportClose">닫기</button></div>
+    <textarea class="bb-import-src" rows="10" spellcheck="false" aria-label="가져올 배치 코드" placeholder="가지고 있는 .bat 내용을 그대로 붙여넣으세요. (Claude 등에서 받은 배치도 됩니다)"></textarea>
+    <div class="hint">맞는 블록이 있는 줄은 블록으로, 없는 줄은 원문 그대로 "코드 직접 입력" 블록으로 들어갑니다 (동작은 원본과 같음).
+      맨 위 <span class="mono">@ECHO OFF</span> · <span class="mono">CHCP</span> · <span class="mono">CD /D "%~dp0"</span> · 관리자 재실행, 맨 아래 <span class="mono">PAUSE</span> · 자기 삭제는 시작/끝 옵션으로 바뀝니다. 지금 블록은 바뀌며 되돌리기로 돌아올 수 있습니다.</div>
+    <div class="btn-row" style="margin-top:10px">
+      <button type="button" class="btn primary" id="btnImportRun">블록으로 바꾸기</button>
+      <button type="button" class="btn" id="btnImportFile">.bat 파일 열기</button>
+      <span class="hint" style="margin:0">Ctrl+Enter 로도 바꿀 수 있고, .bat 파일을 이 칸에 끌어다 놓아도 됩니다.</span>
+    </div>
+    <div class="msg" id="importMsg"></div>
   </div>
 
   <div class="bb-wrap">
@@ -204,13 +232,33 @@
     </div>
   </div>
 
+  <div class="card bb-ask" id="bbAsk" hidden>
+    <div class="card-title">블록으로 못 바꾼 코드 <span class="badge" id="askCount"></span></div>
+    <p class="hint bb-ask-intro">맞는 블록이 없어 원문 그대로 "코드 직접 입력" 블록에 넣은 곳입니다. 결과 배치의 동작은 원본과 같습니다.
+      무슨 뜻인지, 블록으로 바꿀 수 있는지 궁금하면 아래에 질문을 적고 Claude에게 물어보세요.</p>
+    <div id="askList"></div>
+    <div class="field" style="margin-top:12px">
+      <label for="askQ">질문</label>
+      <textarea id="askQ" rows="3" placeholder="비워 두면: 이 부분이 무슨 일을 하는지 쉽게 설명하고, 블록으로 바꿀 수 있는지(없다면 어떤 블록이 있으면 되는지) 물어봅니다."></textarea>
+    </div>
+    <div class="btn-row" style="margin-top:10px">
+      <button type="button" class="btn primary" id="btnAskClaude">Claude에게 질문하기 ↗</button>
+      <button type="button" class="btn" id="btnAskCopy">질문 복사</button>
+      <label class="check"><input type="checkbox" id="askFull" checked>배치 전체 코드도 함께 보내기</label>
+    </div>
+    <div class="msg" id="askMsg"></div>
+    <p class="bb-hint2">새 탭에서 Claude가 열리고 질문이 채워집니다 (claude.ai 로그인 필요). 질문에는 위 코드가 그대로 들어가니, 회사 서버 이름·경로·계정 같은 정보가 있으면 지우고 보내세요.</p>
+  </div>
+
   <datalist id="bbVarList"></datalist>
   <datalist id="bbLabelList"></datalist>
 </div>
 <input type="file" id="fileImport" accept="application/json,.json" style="display:none">
+<input type="file" id="fileBat" accept=".bat,.cmd,.txt" style="display:none">
 
 <script src="../assets/menu.js"></script>
 <script src="../assets/layout.js"></script>
+<script src="batch-builder-import.js"></script>
 <script src="batch-builder.js"></script>
 </body>
 </html>

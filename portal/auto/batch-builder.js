@@ -134,13 +134,15 @@
                       if (f.op === '!=') return 'IF /I NOT "' + n + '"=="' + v + '" (';
                       return 'IF ' + n + ' ' + f.op + ' ' + (v || '0') + ' (';
                     } },
-    if_fail:      { cat:'flow', container:true, hasElse:true, short:'실패하면', kw:'errorlevel 오류 에러 실패 성공 결과', tip:'바로 위 명령의 결과(ERRORLEVEL 1 이상)를 봅니다. "아니면" 칸은 성공했을 때입니다.',
-                    label:['만약 바로 앞 명령이 실패하면'], genOpen:function () { return 'IF ERRORLEVEL 1 ('; } },
+    if_fail:      { cat:'flow', container:true, hasElse:true, short:'성공/실패하면', kw:'errorlevel 오류 에러 실패 성공 결과', tip:'바로 위 명령의 결과(ERRORLEVEL)를 봅니다. 실패 = 1 이상, 성공 = 0. "아니면" 칸은 반대 경우입니다.',
+                    label:['만약 바로 앞 명령이 ', {f:'when'}], fields:{ when:{type:'select', default:'fail', opts:[['fail', '실패하면'], ['ok', '성공하면']]} },
+                    genOpen:function (f) { return f.when === 'ok' ? 'IF NOT ERRORLEVEL 1 (' : 'IF ERRORLEVEL 1 ('; } },
     if_yes:       { cat:'flow', container:true, hasElse:true, short:'Y/N 확인', kw:'choice 확인 물어보기 y n 예 아니오 질문 계속', tip:'Y 또는 N 키 하나로 답합니다. "아니면" 칸은 N 을 눌렀을 때입니다.',
                     label:['만약 ', {f:'msg'}, ' 라고 물어서 Y를 누르면'], fields:{ msg:{type:'text', default:'계속할까요?'} },
                     genOpen:function (f) { return 'CHOICE /C YN /M "' + qtxt(f.msg) + '"\nIF NOT ERRORLEVEL 2 ('; } },
-    if_running:   { cat:'flow', container:true, hasElse:true, short:'실행 중이면', kw:'tasklist 실행 중 프로세스 켜져 있으면 떠 있으면', label:['만약 프로그램 ', {f:'name'}, ' 이(가) 실행 중이면'], fields:{ name:{type:'text', default:'notepad.exe', req:true} },
-                    genOpen:function (f) { var n = unq(f.name); return 'TASKLIST /FI "IMAGENAME eq ' + n + '" | FIND /I "' + n + '" > nul\nIF NOT ERRORLEVEL 1 ('; } },
+    if_running:   { cat:'flow', container:true, hasElse:true, short:'실행 중이면', kw:'tasklist 실행 중 프로세스 켜져 있으면 떠 있으면 꺼져', label:['만약 프로그램 ', {f:'name'}, ' 이(가) ', {f:'st'}],
+                    fields:{ name:{type:'text', default:'notepad.exe', req:true}, st:{type:'select', default:'y', opts:[['y', '실행 중이면'], ['n', '실행 중이 아니면']]} },
+                    genOpen:function (f) { var n = unq(f.name); return 'TASKLIST /FI "IMAGENAME eq ' + n + '" | FIND /I "' + n + '" > nul\nIF ' + (f.st === 'n' ? '' : 'NOT ') + 'ERRORLEVEL 1 ('; } },
 
     // ---- 반복
     for_files: { cat:'loop', container:true, short:'파일마다 반복', kw:'for 파일 반복 each 폴더 하위 /r', tip:'안쪽 블록에서 %%F (전체 경로), %%~nxF (파일 이름만), %%~nF (확장자 뺀 이름) 로 씁니다.',
@@ -149,7 +151,8 @@
                  genOpen:function (f) {
                    var v = unq(f.v);
                    if (f.sub === 'y') return 'FOR /R ' + q(noSlash(f.dir)) + ' %%' + v + ' IN (' + unq(f.pattern) + ') DO (';
-                   return 'FOR %%' + v + ' IN ("' + noSlash(f.dir) + '\\' + unq(f.pattern) + '") DO (';
+                   var d = noSlash(f.dir);
+                   return 'FOR %%' + v + ' IN ("' + (d === '.' ? '' : d + '\\') + unq(f.pattern) + '") DO (';
                  } },
     for_count: { cat:'loop', container:true, short:'숫자만큼 반복', kw:'for /l 횟수 숫자 반복 번', tip:'안쪽 블록에서 %%i 로 지금 숫자를 씁니다.',
                  label:[{f:'from'}, '부터 ', {f:'to'}, '까지 ', {f:'step'}, '씩 반복 — 숫자: %%', {f:'v'}],
@@ -233,6 +236,7 @@
         var id = b.id && !seen[b.id] ? String(b.id) : newId();
         seen[id] = true;
         var nb = { id: id, type: b.type, fields: fields };
+        if (b.type === 'runcmd' && b.src) { nb.src = String(b.src); nb.why = String(b.why || ''); }
         if (def.container) {
           nb.children = fix(b.children);
           if (def.hasElse) { nb.elseChildren = fix(b.elseChildren); nb.showElse = !!b.showElse; }
@@ -480,6 +484,7 @@
     updateEncodingWarning(raw);
     runValidation();
     updateLists();
+    renderAsk();
   }
   function markCode(scroll) {
     var ids = {};
@@ -656,7 +661,7 @@
       el = h('select', { class: 'blk-field' });
       fd.opts.forEach(function (o) { el.appendChild(h('option', { value: o[0] }, o[1])); });
     } else if (fd.type === 'textarea') {
-      el = h('textarea', { class: 'blk-field blk-ta', spellcheck: 'false', placeholder: '명령어를 한 줄에 하나씩' });
+      el = h('textarea', { class: 'blk-field blk-ta', spellcheck: 'false', wrap: 'off', placeholder: '명령어를 한 줄에 하나씩' });
     } else {
       el = h('input', { type: fd.type === 'number' ? 'number' : 'text', class: 'blk-field', spellcheck: 'false', autocomplete: 'off' });
       if (fd.v) el.setAttribute('list', 'bbVarList');
@@ -709,6 +714,7 @@
     def.label.forEach(function (seg) {
       label.appendChild(typeof seg === 'string' ? h('span', null, seg) : renderField(b, seg.f, def.fields[seg.f]));
     });
+    if (b.src) label.insertBefore(h('span', { class: 'blk-src', title: b.why ? '블록으로 못 바꾼 이유: ' + b.why : '' }, '원본 ' + b.src + '줄'), label.children[1] || null);
     head.appendChild(label);
     head.appendChild(renderActions(b, list, idx, def));
     el.appendChild(head);
@@ -1020,6 +1026,131 @@
     else if (k === 'delete' || k === 'backspace') { e.preventDefault(); removeBlock(selectedId); }
     else if (mod && k === 'd') { e.preventDefault(); duplicate(selectedId); }
     else if (k === 'escape') select(null);
+  });
+
+  // ================= 배치 코드 가져오기 =================
+  function importMsg(cls, html) { var m = $('importMsg'); m.className = 'msg' + (cls ? ' ' + cls : ''); m.innerHTML = html || ''; }
+  // .bat 는 한국어 윈도우에서 보통 ANSI(CP949) 로 저장되므로 UTF-8 이 아니면 CP949 로 읽습니다
+  function readBatFile(f, cb) {
+    var r = new FileReader();
+    r.onload = function () {
+      var buf = new Uint8Array(r.result), text;
+      try { text = new TextDecoder('utf-8', { fatal: true }).decode(buf); }
+      catch (e) { try { text = new TextDecoder('euc-kr').decode(buf); } catch (e2) { text = new TextDecoder().decode(buf); } }
+      cb(text.replace(/^﻿/, ''));
+    };
+    r.readAsArrayBuffer(f);
+  }
+  function importBatch(text, fname) {
+    if (!window.BatchImport) { importMsg('err', '변환기(batch-builder-import.js)를 불러오지 못했습니다.'); return; }
+    if (!str(text).trim()) { importMsg('err', '배치 코드를 붙여넣거나 [.bat 파일 열기]로 파일을 고르세요.'); return; }
+    if (ws.blocks.length && !confirm('지금 블록을 가져온 배치로 바꿀까요?\n(되돌리기로 돌아올 수 있습니다)')) return;
+    var r;
+    try { r = window.BatchImport.parse(text, mk); }
+    catch (e) { importMsg('err', '변환하다 멈췄습니다 (' + esc(e.message) + '). 코드를 "코드 직접 입력" 블록에 그대로 붙여넣어 쓰세요.'); return; }
+    pushUndo();
+    ws = sanitize({ blocks: r.blocks });
+    Object.keys(OPT_IDS).forEach(function (k) { $(OPT_IDS[k]).checked = !!r.options[k]; });
+    $('optEncoding').value = r.options.utf8 ? 'utf8' : 'cp949';
+    Portal.store.set('encoding', getEncoding());
+    if (fname) $('bbFilename').value = /\.(bat|cmd)$/i.test(fname) ? fname : fname.replace(/\.[^.]*$/, '') + '.bat';
+    if (form) form.save();
+    Portal.store.set('importSrc', text);
+    askOff = {};
+    selectedId = null; cursor = rootEnd();
+    saveAndRender();
+    var n = 0, names = { echoOff: '명령어 숨기기', cdSelf: '이 폴더에서 시작', admin: '관리자 권한으로 실행', pauseEnd: '끝나면 창 유지', selfDel: '끝나면 이 파일 지우기' };
+    walk(ws.blocks, function () { n++; });
+    var on = Object.keys(names).filter(function (k) { return r.options[k]; }).map(function (k) { return names[k]; });
+    importMsg(r.raw ? 'info' : 'ok', '원본 ' + r.lines + '줄 → 블록 ' + n + '개로 바꿨습니다.' +
+      (on.length ? ' 시작/끝 옵션: ' + esc(on.join(', ')) + '.' : '') +
+      (r.quiet ? ' 화면 출력 숨김(<span class="mono">&gt; nul</span>)은 블록에 없어 ' + r.quiet + '곳에서 뺐습니다 (안내·오류 문구가 보일 수 있음).' : '') +
+      (r.raw ? '<br>맞는 블록이 없는 <b>' + r.raw + '곳</b>은 원문 그대로 "코드 직접 입력" 블록에 넣었습니다 (동작은 원본과 같음). 맨 아래 <b>블록으로 못 바꾼 코드</b> 창에서 확인하고 질문할 수 있습니다.' : ' 모든 줄이 블록으로 바뀌었습니다.'));
+  }
+  var importSrc = document.querySelector('.bb-import-src');
+  $('btnImportBat').onclick = function () {
+    var box = $('bbImport');
+    box.hidden = !box.hidden;
+    if (!box.hidden) { importMsg('', ''); importSrc.focus(); }
+  };
+  $('btnImportClose').onclick = function () { $('bbImport').hidden = true; };
+  $('btnImportRun').onclick = function () { importBatch(importSrc.value); };
+  $('btnImportFile').onclick = function () { $('fileBat').click(); };
+  $('fileBat').onchange = function (e) {
+    var f = e.target.files[0];
+    e.target.value = '';
+    if (f) readBatFile(f, function (t) { importSrc.value = t; importBatch(t, f.name); });
+  };
+  importSrc.addEventListener('keydown', function (e) { if ((e.ctrlKey || e.metaKey) && e.key === 'Enter') { e.preventDefault(); importBatch(importSrc.value); } });
+  importSrc.addEventListener('dragover', function (e) {
+    if (e.dataTransfer && Array.prototype.indexOf.call(e.dataTransfer.types || [], 'Files') >= 0) { e.preventDefault(); importSrc.classList.add('drop-file'); }
+  });
+  importSrc.addEventListener('dragleave', function () { importSrc.classList.remove('drop-file'); });
+  importSrc.addEventListener('drop', function (e) {
+    var f = e.dataTransfer && e.dataTransfer.files && e.dataTransfer.files[0];
+    if (!f) return;
+    e.preventDefault(); importSrc.classList.remove('drop-file');
+    readBatFile(f, function (t) { importSrc.value = t; importBatch(t, f.name); });
+  });
+
+  // ================= 블록으로 못 바꾼 코드 · 질문 =================
+  var askOff = {};   // 질문에서 뺀 블록
+  var ASK_DEFAULT = '이 부분이 무슨 일을 하는지 쉽게 설명해 주고, 블록 조립기의 블록으로 바꿀 수 있는지(없다면 어떤 블록이 있으면 되는지) 알려줘.';
+  function askItems() {
+    var out = [];
+    walk(ws.blocks, function (b) { if (b.type === 'runcmd' && str(b.fields.cmd).trim()) out.push(b); });
+    return out;
+  }
+  function renderAsk() {
+    var items = askItems();
+    $('bbAsk').hidden = !items.length;
+    if (!items.length) return;
+    $('askCount').textContent = items.length + '곳';
+    $('askList').innerHTML = items.map(function (b) {
+      return '<div class="ask-item"><div class="ask-head">' +
+        '<label class="check"><input type="checkbox" data-ask="' + b.id + '"' + (askOff[b.id] ? '' : ' checked') + '>질문에 넣기</label>' +
+        '<span class="ask-meta">' + (b.src ? '원본 ' + esc(b.src) + '줄' : '직접 넣은 코드') + (b.why ? ' · ' + esc(b.why) : '') + '</span>' +
+        '<button type="button" class="btn sm" data-goto="' + b.id + '">블록 보기</button></div>' +
+        '<pre class="ask-code">' + esc(b.fields.cmd) + '</pre></div>';
+    }).join('');
+  }
+  function buildQuestion() {
+    var items = askItems().filter(function (b) { return !askOff[b.id]; });
+    var L = ['Windows 배치파일(.bat)을 블록 조립기(블록을 쌓아 배치파일을 만드는 도구)로 옮기다가, 맞는 블록이 없어 원문 그대로 둔 코드가 있습니다.', '',
+             '[질문]', $('askQ').value.trim() || ASK_DEFAULT];
+    if (items.length) {
+      L.push('', '[블록으로 못 바꾼 코드]');
+      items.forEach(function (b) { L.push((b.src ? '원본 ' + b.src + '줄' : '직접 넣은 코드') + (b.why ? ' (' + b.why + ')' : ''), '```bat', b.fields.cmd, '```'); });
+    }
+    if ($('askFull').checked) {
+      var orig = items.some(function (b) { return b.src; }) ? str(Portal.store.get('importSrc', '')).trim() : '';
+      L.push('', orig ? '[원본 배치 전체]' : '[지금 만든 배치 전체]', '```bat', orig || str($('out').dataset.raw).trim(), '```');
+    }
+    return L.join('\n');
+  }
+  function askMsg(cls, t) { var m = $('askMsg'); m.className = 'msg' + (cls ? ' ' + cls : ''); m.textContent = t || ''; }
+  $('btnAskClaude').onclick = function () {
+    flush();
+    var text = buildQuestion(), url = 'https://claude.ai/new?q=' + encodeURIComponent(text);
+    if (url.length <= 6000) { window.open(url, '_blank', 'noopener'); askMsg('', ''); return; }
+    // 주소가 너무 길면 브라우저가 잘라 버리므로 복사해 두고 빈 대화창을 엽니다
+    Portal.copy(text, $('btnAskCopy'));
+    window.open('https://claude.ai/new', '_blank', 'noopener');
+    askMsg('info', '질문이 길어서 주소에 다 담을 수 없어 복사해 두었습니다. 새로 열린 Claude 창에 붙여넣으세요 (Ctrl+V).');
+  };
+  $('btnAskCopy').onclick = function () { flush(); Portal.copy(buildQuestion(), this); };
+  $('askList').addEventListener('change', function (e) {
+    var id = e.target.getAttribute('data-ask');
+    if (!id) return;
+    if (e.target.checked) delete askOff[id]; else askOff[id] = true;
+  });
+  $('askList').addEventListener('click', function (e) {
+    var bt = e.target.closest('[data-goto]');
+    if (!bt) return;
+    var f = findBlock(bt.getAttribute('data-goto'));
+    if (!f) return;
+    selectedId = f.block.id; cursor = { parent: f.parentId, branch: f.branch, index: f.index + 1 };
+    render(); select(f.block.id, true);
   });
 
   // ================= 시작 =================
