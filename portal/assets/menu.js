@@ -72,6 +72,12 @@ window.PORTAL_MENU = {
           name: '배경 지우개',
           desc: '사진·도장·서명·로고의 배경을 투명하게 지워 PNG로 저장합니다. AI로 남길 물체를 클릭하거나 바탕색을 클릭해 지우고, 브러시로 다듬습니다. 모든 처리는 브라우저 안에서만 합니다.',
           tags: ['배경', '투명', '누끼', 'png', '도장', '직인', '서명', '로고', 'background', 'remove', 'AI']
+        },
+        {
+          file: 'etc/mermaid-editor.html',
+          name: 'Mermaid 에디터',
+          desc: 'Mermaid 코드를 입력하면 바로 다이어그램으로 그려 보여 주고, PNG 복사·PNG 저장·SVG 저장으로 문서에 바로 붙일 수 있게 합니다.',
+          tags: ['mermaid', '머메이드', '다이어그램', '흐름도', '순서도', '시퀀스', 'ERD', '간트', 'diagram', 'flowchart']
         }
       ]
     }
