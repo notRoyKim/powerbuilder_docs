@@ -76,8 +76,8 @@ window.PORTAL_MENU = {
         {
           file: 'etc/mermaid-editor.html',
           name: 'Mermaid 에디터',
-          desc: 'Mermaid 코드를 입력하면 바로 다이어그램으로 그려 보여 주고, PNG 복사·PNG 저장·SVG 저장으로 문서에 바로 붙일 수 있게 합니다.',
-          tags: ['mermaid', '머메이드', '다이어그램', '흐름도', '순서도', '시퀀스', 'ERD', '간트', 'diagram', 'flowchart']
+          desc: '캔버스에 노드를 놓고 선으로 이어 흐름도를 그리면 그대로 Mermaid flowchart 코드로 바꿔 줍니다. 위키·마크다운에 바로 붙여 넣을 수 있습니다.',
+          tags: ['mermaid', '머메이드', '흐름도', '순서도', 'flowchart', '다이어그램', '그리기', 'diagram']
         }
       ]
     }
