@@ -1,0 +1,339 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Mermaid 에디터</title>
+<link rel="stylesheet" href="https://cdn.jsdelivr.net/gh/orioncactus/pretendard@v1.3.9/dist/web/static/pretendard.min.css">
+<link rel="stylesheet" href="../assets/portal.css">
+<style>
+  .mm-grid { align-items: start; }
+  .card-title .spacer { flex: 1; }
+  .mm-acts { display: flex; gap: 6px; flex-wrap: wrap; }
+  .mm-sample { width: auto; flex: none; font: inherit; font-size: 13px; padding: 3px 6px; border: 1px solid var(--border); border-radius: var(--radius); background: var(--surface); color: var(--text); }
+  .mm-acts .btn:disabled { opacity: .45; cursor: default; }
+  #src { min-height: 480px; resize: vertical; tab-size: 4; }
+  /* 미리보기 = 내보낼 이미지 그대로. 문서에 붙일 그림이라 다크모드에서도 흰 바탕을 유지한다 */
+  .mm-paper { background: #fff; border: 1px solid var(--border); border-radius: var(--radius); padding: 16px; min-height: 480px; overflow: auto; display: flex; justify-content: center; align-items: flex-start; }
+  .mm-paper svg { max-width: 100%; height: auto; }
+  .mm-paper.stale svg { opacity: .3; }
+  .mm-stage { position: absolute; left: -10000px; top: 0; visibility: hidden; }
+  .mm-empty { color: #8a8f98; align-self: center; font-size: 14px; }
+  #msg.mm-err { white-space: pre-wrap; font-family: var(--mono); font-size: 12px; }
+</style>
+</head>
+<body>
+
+<div id="form">
+  <div class="grid c2 mm-grid">
+    <div class="card">
+      <div class="card-title">
+        코드
+        <span class="spacer"></span>
+        <select class="mm-sample" aria-label="예시 불러오기">
+          <option value="">예시 불러오기…</option>
+          <option value="flow">흐름도</option>
+          <option value="seq">시퀀스</option>
+          <option value="er">ER 다이어그램</option>
+          <option value="state">상태</option>
+          <option value="gantt">간트</option>
+        </select>
+      </div>
+      <div class="field">
+        <textarea id="src" rows="24" spellcheck="false" aria-label="Mermaid 코드"></textarea>
+        <div class="hint">입력하면 바로 그려집니다. 문법은 <a href="https://mermaid.js.org/intro/syntax-reference.html" target="_blank" rel="noopener">mermaid.js.org</a> 참고.</div>
+      </div>
+    </div>
+
+    <div class="card">
+      <div class="card-title">
+        미리보기
+        <span class="spacer"></span>
+        <span class="mm-acts">
+          <button type="button" class="btn sm" id="btnPngCopy" disabled>PNG 복사</button>
+          <button type="button" class="btn sm" id="btnPng" disabled>PNG 저장</button>
+          <button type="button" class="btn sm" id="btnSvg" disabled>SVG 저장</button>
+        </span>
+      </div>
+      <div class="mm-paper" id="view"><div class="mm-empty">Mermaid 불러오는 중…</div></div>
+      <div class="mm-stage" id="stage"></div>
+      <div class="msg" id="msg"></div>
+    </div>
+  </div>
+</div>
+
+<script src="../assets/menu.js"></script>
+<script src="../assets/layout.js"></script>
+<script>
+(function () {
+  'use strict';
+  var $ = function (id) { return document.getElementById(id); };
+
+  // 다이어그램 엔진: 버전 고정, 처음 열 때 한 번만 받음 (etc/image-eraser.js의 onnxruntime-web과 같은 방식)
+  var MERMAID_URL = 'https://cdn.jsdelivr.net/npm/mermaid@11.17.2/dist/mermaid.min.js';
+  // 미리보기와 PNG가 같은 글꼴로 그려지도록 시스템 글꼴만 쓴다
+  var FONT = '"Malgun Gothic", "Apple SD Gothic Neo", "Noto Sans KR", sans-serif';
+
+  var SAMPLES = {
+    flow: [
+      'flowchart TD',
+      '    A[주문 접수] --> B{재고 확인}',
+      '    B -- 있음 --> C[출고 지시]',
+      '    B -- 없음 --> D[발주 요청]',
+      '    D --> E[입고]',
+      '    E --> C',
+      '    C --> F[배송 완료]'
+    ],
+    seq: [
+      'sequenceDiagram',
+      '    actor U as 사용자',
+      '    participant W as 화면',
+      '    participant S as 서버',
+      '    participant D as DB',
+      '    U->>W: 조회 버튼 클릭',
+      '    W->>S: 주문 목록 요청',
+      '    S->>D: SELECT TB_ORDER',
+      '    D-->>S: 조회 결과',
+      '    S-->>W: 목록 응답',
+      '    W-->>U: 표 표시'
+    ],
+    er: [
+      'erDiagram',
+      '    TB_CUSTOMER ||--o{ TB_ORDER : "주문"',
+      '    TB_ORDER ||--|{ TB_ORDER_ITEM : "포함"',
+      '    TB_CUSTOMER {',
+      '        string CUST_ID PK',
+      '        string CUST_NM',
+      '    }',
+      '    TB_ORDER {',
+      '        string ORDER_NO PK',
+      '        string CUST_ID FK',
+      '        date ORDER_DT',
+      '    }',
+      '    TB_ORDER_ITEM {',
+      '        string ORDER_NO PK, FK',
+      '        int ITEM_SEQ PK',
+      '        int QTY',
+      '    }'
+    ],
+    state: [
+      'stateDiagram-v2',
+      '    state "접수" as S1',
+      '    state "처리중" as S2',
+      '    state "보류" as S3',
+      '    state "완료" as S4',
+      '    [*] --> S1',
+      '    S1 --> S2 : 담당자 배정',
+      '    S2 --> S3 : 추가 정보 필요',
+      '    S3 --> S2 : 정보 받음',
+      '    S2 --> S4 : 처리',
+      '    S4 --> [*]'
+    ],
+    gantt: [
+      'gantt',
+      '    title 시스템 개선 일정',
+      '    dateFormat YYYY-MM-DD',
+      '    section 분석',
+      '    요구사항 정리 :a1, 2026-11-02, 5d',
+      '    section 개발',
+      '    화면 개발 :a2, after a1, 10d',
+      '    배치 개발 :a3, after a1, 7d',
+      '    section 오픈',
+      '    통합 테스트 :a4, after a2, 5d',
+      '    운영 반영 :milestone, after a4, 0d'
+    ]
+  };
+  function sample(k) { return SAMPLES[k].join('\n'); }
+
+  var view = $('view'), msg = $('msg'), src = $('src');
+  var ready = false, seq = 0, timer = null, good = false;
+
+  function setMsg(text, cls) {
+    msg.className = 'msg' + (text ? ' ' + cls : '');
+    msg.textContent = text || '';
+  }
+  function setBtns(on) {
+    $('btnPngCopy').disabled = $('btnPng').disabled = $('btnSvg').disabled = !on;
+  }
+  function empty(text) {
+    view.classList.remove('stale');
+    view.innerHTML = '<div class="mm-empty">' + Portal.esc(text) + '</div>';
+  }
+
+  // ---------- 엔진 불러오기 ----------
+  function loadMermaid() {
+    return new Promise(function (ok, no) {
+      if (window.mermaid) { ok(); return; }
+      var s = document.createElement('script');
+      s.src = MERMAID_URL;
+      s.onload = function () { if (window.mermaid) ok(); else no(new Error('Mermaid를 불러오지 못했습니다.')); };
+      s.onerror = function () { s.remove(); no(new Error('Mermaid를 받지 못했습니다. 인터넷 연결이나 cdn.jsdelivr.net 차단 여부를 확인하세요.')); };
+      document.head.appendChild(s);
+    });
+  }
+
+  // ---------- 그리기 ----------
+  function schedule() { clearTimeout(timer); timer = setTimeout(render, 250); }
+
+  // 렌더 실패 시 mermaid가 body에 남기는 임시 요소 정리
+  function cleanup(id) {
+    ['d' + id, 'i' + id, id].forEach(function (x) {
+      var el = document.getElementById(x);
+      if (el && !view.contains(el)) el.remove();
+    });
+  }
+
+  function render() {
+    if (!ready) return;
+    var text = src.value, my = ++seq, id = 'mm-svg-' + my;
+    if (!text.trim()) { good = false; setBtns(false); setMsg(''); empty('코드를 입력하면 여기에 그려집니다.'); return; }
+
+    window.mermaid.parse(text)
+      .then(function () {
+        // 간트처럼 폭을 바깥에서 정하는 다이어그램이 미리보기 폭에 맞게 그려지도록 같은 폭의 숨은 칸에서 그린다
+        $('stage').style.width = Math.max(600, view.clientWidth - 32) + 'px';
+        return window.mermaid.render(id, text, $('stage'));
+      })
+      .then(function (r) {
+        if (my !== seq) return;
+        view.classList.remove('stale');
+        view.innerHTML = r.svg;
+        good = true; setBtns(true); setMsg('');
+      })
+      .catch(function (e) {
+        cleanup(id);
+        if (my !== seq) return;
+        good = false; setBtns(false);
+        if (view.querySelector('svg')) view.classList.add('stale');   // 마지막 그림은 흐리게 남겨 둔다
+        else empty('그릴 수 없습니다.');
+        setMsg('문법 오류 — ' + String((e && (e.message || e.str)) || e).trim(), 'err mm-err');
+      });
+  }
+
+  // ---------- 내보내기 ----------
+  // 화면의 SVG를 실제 크기·흰 바탕의 독립 SVG 문자열로
+  function exportSvg() {
+    var svg = view.querySelector('svg');
+    var vb = svg.viewBox && svg.viewBox.baseVal;
+    var w = vb && vb.width ? vb.width : svg.getBoundingClientRect().width;
+    var h = vb && vb.height ? vb.height : svg.getBoundingClientRect().height;
+    var c = svg.cloneNode(true);
+    c.setAttribute('xmlns', 'http://www.w3.org/2000/svg');
+    c.setAttribute('xmlns:xlink', 'http://www.w3.org/1999/xlink');
+    c.setAttribute('width', Math.ceil(w));
+    c.setAttribute('height', Math.ceil(h));
+    c.setAttribute('style', 'background-color: #ffffff;');
+    return { text: new XMLSerializer().serializeToString(c), w: Math.ceil(w), h: Math.ceil(h) };
+  }
+
+  // SVG → PNG Blob (2배 해상도, 브라우저 캔버스 한도 안에서)
+  function pngBlob() {
+    return new Promise(function (ok, no) {
+      var s = exportSvg();
+      var scale = Math.max(0.1, Math.min(2, 16000 / s.w, 16000 / s.h));
+      var img = new Image();
+      img.onload = function () {
+        var cv = document.createElement('canvas');
+        cv.width = Math.round(s.w * scale); cv.height = Math.round(s.h * scale);
+        var ctx = cv.getContext('2d');
+        ctx.fillStyle = '#ffffff';
+        ctx.fillRect(0, 0, cv.width, cv.height);
+        ctx.drawImage(img, 0, 0, cv.width, cv.height);
+        try {
+          cv.toBlob(function (b) { if (b) ok(b); else no(new Error('PNG를 만들지 못했습니다. SVG 저장을 쓰세요.')); }, 'image/png');
+        } catch (e) { no(new Error('이 다이어그램은 PNG로 바꿀 수 없습니다. SVG 저장을 쓰세요.')); }
+      };
+      img.onerror = function () { no(new Error('PNG를 만들지 못했습니다. SVG 저장을 쓰세요.')); };
+      img.src = 'data:image/svg+xml;charset=utf-8,' + encodeURIComponent(s.text);
+    });
+  }
+
+  function fileName(ext) {
+    var d = new Date(), p = function (n) { return (n < 10 ? '0' : '') + n; };
+    return 'mermaid-' + d.getFullYear() + p(d.getMonth() + 1) + p(d.getDate()) + '-' + p(d.getHours()) + p(d.getMinutes()) + '.' + ext;
+  }
+  function download(blob, name) {
+    var a = document.createElement('a');
+    a.href = URL.createObjectURL(blob); a.download = name;
+    document.body.appendChild(a); a.click();
+    setTimeout(function () { URL.revokeObjectURL(a.href); a.remove(); }, 500);
+  }
+  function flash(btn, text) {
+    if (!btn.dataset.label) btn.dataset.label = btn.textContent;
+    btn.textContent = text;
+    clearTimeout(btn._t);
+    btn._t = setTimeout(function () { btn.textContent = btn.dataset.label; }, 1200);
+  }
+  function fail(e) { setMsg(e.message, 'err'); }
+
+  $('btnSvg').onclick = function () {
+    if (!good) return;
+    var s = exportSvg();
+    download(new Blob(['<?xml version="1.0" encoding="UTF-8"?>\n' + s.text], { type: 'image/svg+xml' }), fileName('svg'));
+    flash(this, '저장됨');
+  };
+  $('btnPng').onclick = function () {
+    if (!good) return;
+    var btn = this;
+    pngBlob().then(function (b) { download(b, fileName('png')); flash(btn, '저장됨'); }, fail);
+  };
+  $('btnPngCopy').onclick = function () {
+    if (!good) return;
+    var btn = this;
+    if (!navigator.clipboard || !navigator.clipboard.write || !window.ClipboardItem) {
+      fail(new Error('이 브라우저에서는 이미지 복사를 할 수 없습니다. PNG 저장을 쓰세요.'));
+      return;
+    }
+    var p = pngBlob();
+    p.catch(fail);
+    navigator.clipboard.write([new window.ClipboardItem({ 'image/png': p })])
+      .then(function () { flash(btn, '복사됨'); }, function () {
+        p.then(function () { fail(new Error('클립보드에 넣지 못했습니다. PNG 저장을 쓰세요.')); }, function () {});
+      });
+  };
+
+  // ---------- 입력 ----------
+  var saved = Portal.persist($('form'), function (restored) {
+    if (!restored || !src.value.trim()) src.value = sample('flow');
+  });
+
+  $('form').querySelector('.mm-sample').onchange = function () {
+    var k = this.value, cur = src.value.trim(), isSample = false;
+    this.value = '';
+    if (!k) return;
+    for (var x in SAMPLES) if (cur === sample(x)) isSample = true;
+    if (cur && !isSample && !confirm('지금 코드를 예시로 바꿀까요?')) return;
+    src.value = sample(k);
+    saved.save();
+    render();
+  };
+
+  src.addEventListener('input', schedule);
+  // Tab 키는 포커스 이동 대신 들여쓰기
+  src.addEventListener('keydown', function (e) {
+    if (e.key !== 'Tab' || e.shiftKey || e.ctrlKey || e.altKey || e.metaKey) return;
+    e.preventDefault();
+    if (!document.execCommand('insertText', false, '    ')) src.setRangeText('    ', src.selectionStart, src.selectionEnd, 'end');
+  });
+
+  loadMermaid().then(function () {
+    window.mermaid.initialize({
+      startOnLoad: false,
+      theme: 'default',
+      securityLevel: 'strict',
+      suppressErrorRendering: true,
+      htmlLabels: false,                 // 글자를 SVG 텍스트로 → PNG 변환이 막히지 않음
+      flowchart: { htmlLabels: false },
+      fontFamily: FONT,
+      themeVariables: { fontFamily: FONT }
+    });
+    ready = true;
+    render();
+  }, function (e) {
+    empty('Mermaid를 불러오지 못했습니다.');
+    fail(e);
+  });
+})();
+</script>
+</body>
+</html>
