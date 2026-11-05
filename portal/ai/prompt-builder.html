@@ -11,6 +11,16 @@
   .card-title .spacer { flex: 1; }
   #out { white-space: pre-wrap; word-break: break-word; }
   .pb-req { margin-top: 8px; }
+    /* 항목 버튼: 누르면 아래 칸에 한 줄 추가, 다시 누르면 제거 */
+  .pb-chips { display: flex; flex-wrap: wrap; gap: 6px; margin: 6px 0; }
+  .pb-chip {
+    padding: 3px 10px; border: 1px solid var(--border); border-radius: 999px;
+    background: var(--surface); color: var(--text-2); font: inherit; font-size: 12.5px;
+    line-height: 1.6; cursor: pointer;
+  }
+  .pb-chip:hover { border-color: var(--accent); color: var(--text); }
+  .pb-chip.on { background: var(--accent-weak); border-color: var(--accent); color: var(--accent); }
+  .pb-chip.on::before { content: '✓ '; }
 </style>
 </head>
 <body>
@@ -21,13 +31,34 @@
       <button type="button" class="btn sm" id="btnReset">입력 초기화</button>
     </div>
     <div class="field">
+      <label>빠른 시작</label>
+      <div class="btn-row" id="presets"></div>
+      <div class="hint">대상·어조·분량은 프리셋 값으로 바뀌고, 글 칸은 지우지 않고 줄만 추가돼요</div>
+    </div>
+    <div class="field" style="margin-top:12px">
       <label for="goal">목표 (필수)</label>
-      <input type="text" id="goal" placeholder="예) 신규 입사자용 VPN 설정 안내문을 작성해줘">
-      <div class="hint">무엇을 위한 무엇을 원하는지 한 문장으로</div>
+      <input type="text" id="goal" list="pbGoal" placeholder="예) 신규 입사자용 VPN 설정 안내문을 작성해줘">
+      <datalist id="pbGoal"></datalist>
+      <div class="hint">무엇을 위한 무엇을 원하는지 한 문장으로 · 빈 칸을 클릭하면 문장 틀이 나와요</div>
+    </div>
+    <div class="grid c3" style="margin-top:12px">
+      <div class="field">
+        <label for="audience">대상 독자</label>
+        <input type="text" id="audience" list="pbAudience" placeholder="선택 또는 직접 입력">
+        <datalist id="pbAudience"></datalist>
+      </div>
+      <div class="field">
+        <label for="tone">어조</label>
+        <select id="tone"></select>
+      </div>
+      <div class="field">
+        <label for="len">분량</label>
+        <select id="len"></select>
+      </div>
     </div>
     <div class="field" style="margin-top:12px">
       <label for="context">맥락</label>
-      <textarea id="context" rows="4" spellcheck="false" placeholder="배경 · 대상 · 현재 상황&#10;예) 대상은 비개발 직군, 윈도우 PC 기준"></textarea>
+      <textarea id="context" rows="4" spellcheck="false" placeholder="배경 · 현재 상황 · 요약/정리할 원문&#10;예) 윈도우 PC 기준, 사내 VPN 프로그램 설치 후 진행"></textarea>
     </div>
   </div>
 
@@ -36,13 +67,15 @@
     <div class="grid c2">
       <div class="field">
         <label for="req">요구사항</label>
-        <textarea id="req" rows="7" spellcheck="false" placeholder="한 줄에 하나&#10;예)&#10;단계별로 설명&#10;메뉴 이름은 굵게 표시"></textarea>
-        <div class="hint">순번·글머리(-, 1., ①)는 붙여넣어도 자동 정리, 중복 줄 제외</div>
+        <div class="pb-chips" data-for="req"></div>
+        <textarea id="req" rows="7" spellcheck="false" placeholder="위 항목을 누르거나 한 줄에 하나씩 입력"></textarea>
+        <div class="hint">항목을 다시 누르면 빠짐 · 순번·글머리(-, 1., ①)는 자동 정리, 중복 줄 제외</div>
       </div>
       <div class="field">
         <label for="con">제약</label>
-        <textarea id="con" rows="7" spellcheck="false" placeholder="하지 말 것 · 한도&#10;예)&#10;500자 이내&#10;전문 용어 쓰지 않기"></textarea>
-        <div class="hint">한 줄에 하나</div>
+        <div class="pb-chips" data-for="con"></div>
+        <textarea id="con" rows="7" spellcheck="false" placeholder="하지 말 것 · 한도&#10;위 항목을 누르거나 한 줄에 하나씩 입력"></textarea>
+        <div class="hint">분량은 1번에서 고르면 제약 맨 앞에 들어가요</div>
       </div>
     </div>
     <label class="check pb-req"><input type="checkbox" id="prio">요구사항이 충돌하면 번호가 앞선 것을 우선한다는 문장 추가</label>
@@ -53,7 +86,8 @@
     <div class="grid c2">
       <div class="field">
         <label for="fmt">출력 형식</label>
-        <textarea id="fmt" rows="5" spellcheck="false" placeholder="예) 마크다운 번호 목록, 마지막 줄에 문의처"></textarea>
+        <div class="pb-chips" data-for="fmt"></div>
+        <textarea id="fmt" rows="5" spellcheck="false" placeholder="위 항목을 누르거나 직접 입력&#10;예) 마크다운 번호 목록, 마지막 줄에 문의처"></textarea>
       </div>
       <div class="field">
         <label for="ex">예시</label>
@@ -85,14 +119,54 @@
 (function () {
   'use strict';
   var $ = function (id) { return document.getElementById(id); };
+  
+  /* ===== 선택지: 여기만 고치면 화면이 바뀝니다 ===== */
+  var OPTIONS = {
+    goal: [
+      '○○ 안내문을 작성해줘',
+      '○○에 관한 이메일을 작성해줘',
+      '아래 내용을 요약해줘',
+      '아래 회의 메모를 회의록으로 정리해줘',
+      '아래 글을 자연스럽게 다듬어줘',
+      '아래 코드를 리뷰해줘',
+      '○○ 기능을 구현하는 코드를 작성해줘',
+      '○○ 오류의 원인과 해결 방법을 알려줘'
+    ],
+    audience: ['비개발 직군 동료', '개발자', '신규 입사자', '팀장 · 임원', '외부 고객'],
+    tone: ['', '정중하게', '친근하게', '간결하게', '공식 문서체'],            // '' = 지정 안 함
+    len:  ['', '3줄 이내', '300자 이내', '500자 이내', '1000자 이내', 'A4 1장 이내'],
+    req: ['단계별로 설명', '핵심부터 먼저', '예시 포함', '메뉴 · 버튼 이름은 굵게',
+          '결정 사항과 할 일(담당 · 기한) 구분', '근거를 함께 제시', '확실하지 않으면 추측하지 말고 질문'],
+    con: ['전문 용어 쓰지 않기', '과장 · 수식어 빼기', '확인되지 않은 내용 넣지 않기',
+          '이모지 쓰지 않기', '개인정보 · 사내 기밀 넣지 않기'],
+    fmt: ['마크다운 번호 목록', '표로 정리', '제목 + 본문 + 요약', '코드 블록 포함',
+          '이메일 형식 (제목 / 본문)', 'JSON']
+  };
+
+  // 빠른 시작: 대상·어조·분량은 이 값으로 교체(없으면 비움), req/con/fmt는 줄 추가만
+  var PRESETS = [
+    { name: '안내문', goal: '○○ 안내문을 작성해줘', audience: '비개발 직군 동료', tone: '친근하게',
+      req: ['단계별로 설명', '메뉴 · 버튼 이름은 굵게'], con: ['전문 용어 쓰지 않기'], fmt: ['마크다운 번호 목록'] },
+    { name: '이메일', goal: '○○에 관한 이메일을 작성해줘', audience: '외부 고객', tone: '정중하게',
+      req: ['핵심부터 먼저'], con: ['과장 · 수식어 빼기'], fmt: ['이메일 형식 (제목 / 본문)'] },
+    { name: '요약', goal: '아래 내용을 요약해줘', tone: '간결하게', len: '3줄 이내',
+      req: ['핵심부터 먼저'], con: ['확인되지 않은 내용 넣지 않기'] },
+    { name: '회의록', goal: '아래 회의 메모를 회의록으로 정리해줘', tone: '공식 문서체',
+      req: ['결정 사항과 할 일(담당 · 기한) 구분'], fmt: ['제목 + 본문 + 요약'] },
+    { name: '코드 리뷰', goal: '아래 코드를 리뷰해줘', audience: '개발자',
+      req: ['근거를 함께 제시', '확실하지 않으면 추측하지 말고 질문'], fmt: ['코드 블록 포함'] }
+  ];
+  /* ================================================ */
 
   var FIELDS = ['goal', 'context', 'req', 'con', 'fmt', 'ex'];
   var LABEL = { goal: '목표', context: '맥락', req: '요구사항', con: '제약', fmt: '출력 형식', ex: '예시' };
   var TAG = { goal: 'goal', context: 'context', req: 'requirements', con: 'constraints', fmt: 'output_format', ex: 'examples' };
   // 줄 앞 순번·글머리: "- " "* " "+ " "•" "1." "1)" "(1)" "①"
   var BULLET = /^(?:[-*+]\s+|[•·▪○●■□]\s*|\d{1,3}[.)]\s+|\(\d{1,3}\)\s*|[\u2460-\u2473]\s*)/;
+  var BLANK = '○○';   // 목표 문장 틀의 빈칸. 결과에 남으면 오류로 막음
 
   function rowsOf(text) { return text.split(/\r?\n/).filter(function (l) { return l.trim() !== ''; }); }
+  function norm(line) { return line.trim().replace(BULLET, '').trim(); }   // 순번·글머리 뗀 한 줄
 
   // 문단 정리: 줄끝 공백 제거, 빈 줄 3개 이상 → 1개
   function clean(text) {
@@ -104,13 +178,98 @@
     var seen = {}, out = [];
     out.dup = 0;
     rowsOf(text).forEach(function (l) {
-      var v = l.trim().replace(BULLET, '').trim();
+      var v = norm(l);
       if (!v) return;
       if (seen[v]) { out.dup++; return; }
       seen[v] = true;
       out.push(v);
     });
     return out;
+  }
+  
+  /* ---------- 선택 목록 · 항목 버튼 · 빠른 시작 ---------- */
+
+  // 코드로 값을 바꾼 뒤 이벤트를 발생시켜 build()와 Portal.persist 저장이 반응하게 함
+  function fire(el) {
+    el.dispatchEvent(new Event('input', { bubbles: true }));
+    el.dispatchEvent(new Event('change', { bubbles: true }));
+  }
+  function hasLine(ta, text) { return rowsOf(ta.value).some(function (l) { return norm(l) === text; }); }
+  function addLine(ta, text) {
+    if (hasLine(ta, text)) return;
+    var v = ta.value.replace(/\s+$/, '');
+    ta.value = v ? v + '\n' + text : text;
+  }
+  function removeLine(ta, text) {
+    ta.value = ta.value.split(/\r?\n/).filter(function (l) { return norm(l) !== text; }).join('\n');
+  }
+  function addOption(parent, value, text) {
+    var o = document.createElement('option');
+    o.value = value;
+    if (text !== undefined) o.textContent = text;
+    parent.appendChild(o);
+  }
+
+  // Portal.persist보다 먼저 호출해야 select 저장값이 복원됨
+  function renderOptions() {
+    OPTIONS.goal.forEach(function (v) { addOption($('pbGoal'), v); });
+    OPTIONS.audience.forEach(function (v) { addOption($('pbAudience'), v); });
+    ['tone', 'len'].forEach(function (id) {
+      OPTIONS[id].forEach(function (v) { addOption($(id), v, v || '지정 안 함'); });
+    });
+
+    Array.prototype.forEach.call(document.querySelectorAll('.pb-chips'), function (box) {
+      var key = box.getAttribute('data-for'), ta = $(key);
+      OPTIONS[key].forEach(function (t) {
+        var b = document.createElement('button');
+        b.type = 'button'; b.className = 'pb-chip'; b.textContent = t;
+        b.setAttribute('data-v', t);
+        box.appendChild(b);
+      });
+      box.addEventListener('click', function (e) {
+        var t = e.target.getAttribute('data-v');
+        if (t === null) return;
+        if (hasLine(ta, t)) removeLine(ta, t); else addLine(ta, t);
+        fire(ta);
+      });
+    });
+
+    PRESETS.forEach(function (p, i) {
+      var b = document.createElement('button');
+      b.type = 'button'; b.className = 'btn sm'; b.textContent = p.name;
+      b.setAttribute('data-i', i);
+      $('presets').appendChild(b);
+    });
+    $('presets').addEventListener('click', function (e) {
+      var i = e.target.getAttribute('data-i');
+      if (i !== null) applyPreset(PRESETS[i]);
+    });
+  }
+
+  // 칸 내용에 맞춰 항목 버튼 켜짐 표시 (직접 타이핑하거나 지워도 따라감)
+  function syncChips() {
+    Array.prototype.forEach.call(document.querySelectorAll('.pb-chips'), function (box) {
+      var ta = $(box.getAttribute('data-for'));
+      Array.prototype.forEach.call(box.children, function (b) {
+        var on = hasLine(ta, b.getAttribute('data-v'));
+        b.classList.toggle('on', on);
+        b.setAttribute('aria-pressed', on ? 'true' : 'false');
+      });
+    });
+  }
+
+  function applyPreset(p) {
+    var goal = $('goal'), cur = goal.value.trim();
+    // 목표: 비어 있거나 아직 문장 틀 그대로일 때만 교체
+    if (!cur || OPTIONS.goal.indexOf(cur) >= 0 || cur.indexOf(BLANK) >= 0) { goal.value = p.goal; fire(goal); }
+    ['audience', 'tone', 'len'].forEach(function (k) { $(k).value = p[k] || ''; fire($(k)); });
+    ['req', 'con', 'fmt'].forEach(function (k) {
+      (p[k] || []).forEach(function (t) { addLine($(k), t); });
+      fire($(k));
+    });
+    // ○○를 선택해 두면 바로 타이핑해서 바꿀 수 있음
+    var at = goal.value.indexOf(BLANK);
+    if (at >= 0) { goal.focus(); goal.setSelectionRange(at, at + BLANK.length); }
   }
 
   function section(style, key, body) {
@@ -123,9 +282,13 @@
   function convert(v) {
     var goal = clean(v.goal);
     if (!goal) throw new Error('목표를 입력하세요. (무엇을 위한 무엇을 원하는지 한 문장)');
+	if (goal.indexOf(BLANK) >= 0) throw new Error('목표의 ' + BLANK + ' 부분을 실제 내용으로 바꿔주세요.');
 
     var parts = [section(v.style, 'goal', goal)];
-    var ctx = clean(v.context);
+    var meta = [];
+	if (v.audience) meta.push('- 대상 독자: ' + v.audience);
+	if (v.tone) meta.push('- 어조: ' + v.tone);
+	var ctx = [meta.join('\n'), clean(v.context)].filter(Boolean).join('\n\n');
     if (ctx) parts.push(section(v.style, 'context', ctx));
 
     if (v.req.length) {
@@ -153,13 +316,16 @@
   function build() {
     var out = '', msg = $('msg'), info = '';
     msg.className = 'msg'; msg.textContent = '';
+	syncChips();
 
     var any = FIELDS.some(function (id) { return $(id).value.trim() !== ''; });
     if (any) {
       var req = itemsOf($('req').value), con = itemsOf($('con').value);
+	  if ($('len').value) con.unshift('분량: ' + $('len').value);   // 분량은 제약 맨 앞에
       try {
         out = convert({
           goal: $('goal').value, context: $('context').value,
+		  audience: $('audience').value.trim(), tone: $('tone').value,
           req: req, con: con,
           fmt: $('fmt').value, ex: $('ex').value,
           prio: $('prio').checked, style: styleOf()
@@ -176,7 +342,7 @@
     $('out').innerHTML = out ? Portal.esc(out) : '<span class="cm">목표를 입력하면 여기에 표시됩니다.</span>';
     $('out').dataset.raw = out;
   }
-
+  renderOptions();
   $('form').addEventListener('input', build);
   $('form').addEventListener('change', build);
   $('btnCopy').onclick = function () { Portal.copy($('out').dataset.raw || '', this); };
