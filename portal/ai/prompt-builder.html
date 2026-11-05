@@ -1,0 +1,194 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>프롬프트 빌더</title>
+<link rel="stylesheet" href="https://cdn.jsdelivr.net/gh/orioncactus/pretendard@v1.3.9/dist/web/static/pretendard.min.css">
+<link rel="stylesheet" href="../assets/portal.css">
+<style>
+  /* 이 페이지 전용 스타일만 (색은 var(--…) 토큰) */
+  .card-title .spacer { flex: 1; }
+  #out { white-space: pre-wrap; word-break: break-word; }
+  .pb-req { margin-top: 8px; }
+</style>
+</head>
+<body>
+
+<div id="form">
+  <div class="card">
+    <div class="card-title"><span class="step">1</span>목표 · 맥락<span class="spacer"></span>
+      <button type="button" class="btn sm" id="btnReset">입력 초기화</button>
+    </div>
+    <div class="field">
+      <label for="goal">목표 (필수)</label>
+      <input type="text" id="goal" placeholder="예) 신규 입사자용 VPN 설정 안내문을 작성해줘">
+      <div class="hint">무엇을 위한 무엇을 원하는지 한 문장으로</div>
+    </div>
+    <div class="field" style="margin-top:12px">
+      <label for="context">맥락</label>
+      <textarea id="context" rows="4" spellcheck="false" placeholder="배경 · 대상 · 현재 상황&#10;예) 대상은 비개발 직군, 윈도우 PC 기준"></textarea>
+    </div>
+  </div>
+
+  <div class="card">
+    <div class="card-title"><span class="step">2</span>요구사항 · 제약</div>
+    <div class="grid c2">
+      <div class="field">
+        <label for="req">요구사항</label>
+        <textarea id="req" rows="7" spellcheck="false" placeholder="한 줄에 하나&#10;예)&#10;단계별로 설명&#10;메뉴 이름은 굵게 표시"></textarea>
+        <div class="hint">순번·글머리(-, 1., ①)는 붙여넣어도 자동 정리, 중복 줄 제외</div>
+      </div>
+      <div class="field">
+        <label for="con">제약</label>
+        <textarea id="con" rows="7" spellcheck="false" placeholder="하지 말 것 · 한도&#10;예)&#10;500자 이내&#10;전문 용어 쓰지 않기"></textarea>
+        <div class="hint">한 줄에 하나</div>
+      </div>
+    </div>
+    <label class="check pb-req"><input type="checkbox" id="prio">요구사항이 충돌하면 번호가 앞선 것을 우선한다는 문장 추가</label>
+  </div>
+
+  <div class="card">
+    <div class="card-title"><span class="step">3</span>출력 형식 · 예시</div>
+    <div class="grid c2">
+      <div class="field">
+        <label for="fmt">출력 형식</label>
+        <textarea id="fmt" rows="5" spellcheck="false" placeholder="예) 마크다운 번호 목록, 마지막 줄에 문의처"></textarea>
+      </div>
+      <div class="field">
+        <label for="ex">예시</label>
+        <textarea id="ex" rows="5" spellcheck="false" placeholder="원하는 결과의 예시 (그대로 들어감)"></textarea>
+      </div>
+    </div>
+  </div>
+
+  <div class="card">
+    <div class="card-title">결과<span class="spacer"></span>
+      <div class="seg">
+        <label><input type="radio" name="style" value="md" checked>마크다운</label>
+        <label><input type="radio" name="style" value="xml">XML 태그</label>
+        <label><input type="radio" name="style" value="plain">평문</label>
+      </div>
+    </div>
+    <div class="code-wrap">
+      <button type="button" class="btn sm" id="btnCopy">복사</button>
+      <pre class="code" id="out"></pre>
+    </div>
+    <div class="hint" id="count"></div>
+    <div class="msg" id="msg"></div>
+  </div>
+</div>
+
+<script src="../assets/menu.js"></script>
+<script src="../assets/layout.js"></script>
+<script>
+(function () {
+  'use strict';
+  var $ = function (id) { return document.getElementById(id); };
+
+  var FIELDS = ['goal', 'context', 'req', 'con', 'fmt', 'ex'];
+  var LABEL = { goal: '목표', context: '맥락', req: '요구사항', con: '제약', fmt: '출력 형식', ex: '예시' };
+  var TAG = { goal: 'goal', context: 'context', req: 'requirements', con: 'constraints', fmt: 'output_format', ex: 'examples' };
+  // 줄 앞 순번·글머리: "- " "* " "+ " "•" "1." "1)" "(1)" "①"
+  var BULLET = /^(?:[-*+]\s+|[•·▪○●■□]\s*|\d{1,3}[.)]\s+|\(\d{1,3}\)\s*|[\u2460-\u2473]\s*)/;
+
+  function rowsOf(text) { return text.split(/\r?\n/).filter(function (l) { return l.trim() !== ''; }); }
+
+  // 문단 정리: 줄끝 공백 제거, 빈 줄 3개 이상 → 1개
+  function clean(text) {
+    return text.replace(/\r\n?/g, '\n').replace(/[ \t]+$/gm, '').replace(/\n{3,}/g, '\n\n').trim();
+  }
+
+  // 목록 정리: 순번·글머리 제거 + 중복 제거. 결과 배열의 .dup = 뺀 중복 줄 수
+  function itemsOf(text) {
+    var seen = {}, out = [];
+    out.dup = 0;
+    rowsOf(text).forEach(function (l) {
+      var v = l.trim().replace(BULLET, '').trim();
+      if (!v) return;
+      if (seen[v]) { out.dup++; return; }
+      seen[v] = true;
+      out.push(v);
+    });
+    return out;
+  }
+
+  function section(style, key, body) {
+    if (style === 'xml') return '<' + TAG[key] + '>\n' + body + '\n</' + TAG[key] + '>';
+    if (style === 'plain') return '[' + LABEL[key] + ']\n' + body;
+    return '## ' + LABEL[key] + '\n' + body;
+  }
+
+  // 칸 순서대로 조립. 빈 칸은 섹션째 생략
+  function convert(v) {
+    var goal = clean(v.goal);
+    if (!goal) throw new Error('목표를 입력하세요. (무엇을 위한 무엇을 원하는지 한 문장)');
+
+    var parts = [section(v.style, 'goal', goal)];
+    var ctx = clean(v.context);
+    if (ctx) parts.push(section(v.style, 'context', ctx));
+
+    if (v.req.length) {
+      var body = v.req.map(function (r, i) { return (i + 1) + '. ' + r; }).join('\n');
+      if (v.prio && v.req.length > 1) body += '\n\n요구사항이 서로 충돌하면 번호가 앞선 것을 우선한다.';
+      parts.push(section(v.style, 'req', body));
+    }
+    if (v.con.length) {
+      parts.push(section(v.style, 'con', v.con.map(function (c) { return '- ' + c; }).join('\n')));
+    }
+
+    var fmt = clean(v.fmt);
+    if (fmt) parts.push(section(v.style, 'fmt', fmt));
+    var ex = clean(v.ex);
+    if (ex) parts.push(section(v.style, 'ex', ex));
+
+    return parts.join('\n\n');
+  }
+
+  function styleOf() {
+    var r = document.querySelector('input[name="style"]:checked');
+    return r ? r.value : 'md';
+  }
+
+  function build() {
+    var out = '', msg = $('msg'), info = '';
+    msg.className = 'msg'; msg.textContent = '';
+
+    var any = FIELDS.some(function (id) { return $(id).value.trim() !== ''; });
+    if (any) {
+      var req = itemsOf($('req').value), con = itemsOf($('con').value);
+      try {
+        out = convert({
+          goal: $('goal').value, context: $('context').value,
+          req: req, con: con,
+          fmt: $('fmt').value, ex: $('ex').value,
+          prio: $('prio').checked, style: styleOf()
+        });
+      } catch (e) { msg.className = 'msg err'; msg.textContent = e.message; }
+
+      if (out) {
+        info = '결과 ' + out.length + '자 · 요구사항 ' + req.length + '개 · 제약 ' + con.length + '개';
+        if (req.dup + con.dup) info += ' (중복 ' + (req.dup + con.dup) + '줄 제외)';
+      }
+    }
+
+    $('count').textContent = info;
+    $('out').innerHTML = out ? Portal.esc(out) : '<span class="cm">목표를 입력하면 여기에 표시됩니다.</span>';
+    $('out').dataset.raw = out;
+  }
+
+  $('form').addEventListener('input', build);
+  $('form').addEventListener('change', build);
+  $('btnCopy').onclick = function () { Portal.copy($('out').dataset.raw || '', this); };
+
+  var form = Portal.persist($('form'));
+  $('btnReset').onclick = function () {
+    if (!confirm('입력을 모두 지울까요?')) return;
+    form.clear();
+    location.reload();
+  };
+  build();
+})();
+</script>
+</body>
+</html>

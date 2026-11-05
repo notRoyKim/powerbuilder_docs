@@ -80,7 +80,20 @@ window.PORTAL_MENU = {
           tags: ['mermaid', '머메이드', '흐름도', '순서도', 'flowchart', '다이어그램', '그리기', 'diagram']
         }
       ]
-    }
+    },
+	{
+	  id: 'ai',
+	  name: 'AI 도구',
+	  desc: '프롬프트 작성',
+	  items: [
+		{
+		  file: 'ai/prompt-builder.html',
+		  name: '프롬프트 빌더',
+		  desc: '목표·맥락·요구사항·제약·출력 형식을 칸별로 적으면 정형화된 프롬프트로 조립합니다. 붙여넣은 목록의 순번·중복은 자동 정리.',
+		  tags: ['프롬프트', 'prompt', 'AI', 'LLM', 'GPT', 'Claude', '템플릿']
+		}
+	  ]
+	}
     /*
     , {
       id: 'text',
