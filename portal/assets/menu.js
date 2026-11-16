@@ -78,6 +78,12 @@ window.PORTAL_MENU = {
           name: 'Mermaid 에디터',
           desc: '캔버스에 노드를 놓고 선으로 이어 흐름도를 그리면 그대로 Mermaid flowchart 코드로 바꿔 줍니다. 위키·마크다운에 바로 붙여 넣을 수 있습니다.',
           tags: ['mermaid', '머메이드', '흐름도', '순서도', 'flowchart', '다이어그램', '그리기', 'diagram']
+        },
+        {
+          file: 'etc/cable-label.html',
+          name: '케이블 라벨 시뮬레이터',
+          desc: '케이블 목록을 엑셀에서 붙여넣으면 엡손 LW-K460 라벨(깃발·감싸기·일반, 표·테두리)로 미리 보고, 테이프·문자 크기(pt)·길이고정 등 본체 설정 순서를 한 건씩 안내합니다.',
+          tags: ['라벨', '라벨프린터', '라벨기', 'LW-K460', '엡손', 'epson', '케이블', '전원', '깃발', 'label', 'cable']
         }
       ]
     },

@@ -1,0 +1,300 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>케이블 라벨 시뮬레이터</title>
+<link rel="stylesheet" href="https://cdn.jsdelivr.net/gh/orioncactus/pretendard@v1.3.9/dist/web/static/pretendard.min.css">
+<link rel="stylesheet" href="../assets/portal.css">
+<style>
+  /* 케이블 라벨 시뮬레이터 전용 (cl-) — 색은 토큰만. 라벨 미리보기 안의 테이프·글자색은 실제 테이프 색 */
+  .card-title .spacer{flex:1}
+  .cl-sec{font-size:12px;font-weight:700;color:var(--text-3);margin:16px 0 8px}
+  .cl-sec:first-of-type{margin-top:0}
+  .cl-span2{grid-column:span 2}
+  @media (max-width:900px){.cl-span2{grid-column:auto}}
+  .seg label:has(input:disabled){opacity:.4;pointer-events:none}
+  #clOpts .field .check,.cl-scroll .check{display:inline-flex;align-items:center;gap:5px;font-weight:400}
+  #clOpts input:disabled,#clOpts select:disabled{opacity:.45}
+  .cl-tapeinfo{margin-top:12px;font-size:12.5px;color:var(--text-2);display:flex;gap:8px;align-items:center;flex-wrap:wrap}
+  .cl-swatch{display:inline-block;width:34px;height:16px;border-radius:3px;border:1px solid var(--border);vertical-align:middle;text-align:center;font-size:10px;line-height:14px;font-weight:700}
+  .cl-note{font-size:12.5px;padding:7px 10px;border-radius:7px;margin-top:8px;line-height:1.6;background:color-mix(in srgb,var(--accent) 10%,transparent);color:var(--text)}
+  .cl-note:empty{display:none}
+  details.cl-adv{margin-top:14px}
+  details.cl-adv summary{cursor:pointer;color:var(--text-2);font-size:13px}
+  details.cl-adv .grid{margin-top:10px}
+  .cl-tapes{font-size:12.5px;border-collapse:collapse;width:100%}
+  .cl-tapes th,.cl-tapes td{border-bottom:1px solid var(--border);padding:5px 8px;text-align:left}
+  .cl-tapes th{color:var(--text-2);font-weight:500;background:var(--surface-2);position:sticky;top:0}
+  .cl-tapes tr.no td{color:var(--text-3)}
+  .cl-scroll{overflow:auto;border:1px solid var(--border);border-radius:8px}
+
+  /* 입력 표 */
+  table.cl-in{border-collapse:separate;border-spacing:0;min-width:100%}
+  table.cl-in th,table.cl-in td{border-bottom:1px solid var(--border);border-right:1px solid var(--border);padding:0;background:var(--surface)}
+  table.cl-in thead th{position:sticky;z-index:2;background:var(--surface-2);font-weight:500}
+  table.cl-in .rn{width:64px;min-width:64px;font-size:12px;color:var(--text-3);text-align:center;position:sticky;left:0;z-index:1;background:var(--surface-2)}
+  table.cl-in thead .rn{z-index:3}
+  table.cl-in td input[type=text],table.cl-in .hname{border:0;border-radius:0;height:32px;background:transparent;min-width:130px;width:100%;padding:4px 8px;outline:none;box-shadow:none}
+  table.cl-in td input[type=text]:focus,table.cl-in .hname:focus{background:var(--accent-weak)}
+  table.cl-in .hname{font-weight:700}
+  table.cl-in select{border:0;border-radius:0;height:31px;background:transparent;font-size:12.5px;padding:2px 6px;width:100%}
+  table.cl-in tr.cf3 th{padding:5px 8px;text-align:left}
+  table.cl-in tr.cf3 th.rn{text-align:center}
+  table.cl-in tr.cf3 .check{margin-right:8px}
+  table.cl-in tr.off td input[type=text]{color:var(--text-3);text-decoration:line-through}
+  .cl-is-table table.cl-in tr.cf2 select,.cl-is-table table.cl-in .pfx{opacity:.4}
+  .cl-hcell{display:flex;align-items:center}
+  .cl-rcell{display:flex;align-items:center;justify-content:center;gap:2px}
+  .cl-x{border:0;background:transparent;color:var(--text-3);cursor:pointer;font-size:15px;padding:0 6px;line-height:1}
+  .cl-x:hover{color:var(--danger)}
+  th.cl-addc{background:var(--surface-2);min-width:40px}
+
+  /* 결과 */
+  .cl-sum{display:flex;flex-wrap:wrap;gap:6px 8px;margin-bottom:12px}
+  .cl-chip{background:var(--surface-2);border:1px solid var(--border);border-radius:99px;padding:3px 10px;font-size:12.5px}
+  .cl-chip.warn{border-color:var(--danger);color:var(--danger)}
+  .cl-nav{display:flex;align-items:center;gap:8px;flex-wrap:wrap;margin-bottom:12px}
+  .cl-nav .pos{font-weight:700;min-width:120px;text-align:center}
+  .cl-nav .spacer{flex:1}
+  .cl-card{border:1px solid var(--border);border-radius:var(--radius);padding:14px;margin-bottom:14px;background:var(--surface)}
+  .cl-card.has-warn{border-color:color-mix(in srgb,var(--danger) 50%,var(--border))}
+  .cl-card-h{display:flex;align-items:center;gap:8px;margin-bottom:10px;flex-wrap:wrap}
+  .cl-card-h .no{font-weight:700;font-size:15px}
+  .cl-card-h .meta{font-size:12.5px;color:var(--text-2)}
+  .cl-card-h .spacer{flex:1}
+  .cl-stage{background:var(--surface-2);border:1px solid var(--border);border-radius:8px;padding:14px 18px;overflow:auto;color:var(--text-3)}
+  .cl-stage svg{display:block;max-width:100%;height:auto}
+  .cl-stage.real svg{max-width:none}
+  .cl-dim{font-size:12.5px;color:var(--text-2);margin-top:8px}
+  .cl-warn{list-style:none;padding:0;margin:6px 0 0;font-size:12.5px;color:var(--danger)}
+  .cl-warn li::before{content:'⚠ '}
+  .cl-body{display:grid;grid-template-columns:minmax(0,5fr) minmax(0,7fr);gap:14px;margin-top:12px}
+  @media (max-width:900px){.cl-body{grid-template-columns:1fr}}
+  .cl-panel{border:1px solid var(--border);border-radius:8px;padding:12px}
+  .cl-panel h3{margin:0 0 8px;font-size:13px;color:var(--text-2)}
+  .cl-panel h4{margin:10px 0 4px;font-size:12px;color:var(--text-3);font-weight:500}
+  ol.cl-lines{margin:0;padding-left:28px;font-size:20px;font-weight:700;line-height:1.55}
+  ol.cl-lines li::marker{color:var(--text-3);font-size:13px;font-weight:400}
+  ol.cl-lines .sep{color:var(--accent)}
+  table.cl-steps{border-collapse:collapse;width:100%;font-size:13px}
+  table.cl-steps td{padding:6px;border-top:1px solid var(--border);vertical-align:top}
+  table.cl-steps tr:first-child td{border-top:0}
+  table.cl-steps td.n{width:26px;color:var(--text-3);font-weight:700;text-align:right}
+  table.cl-steps td.t{width:80px;color:var(--text-2);font-weight:500;white-space:nowrap}
+  .cl-prev{font-size:12px;color:var(--text-3);margin-left:4px;text-decoration:line-through}
+  .cl-chg{display:inline-block;font-size:11px;font-weight:700;color:var(--accent);background:var(--accent-weak);border-radius:4px;padding:0 5px;margin-right:4px}
+  .cl-same{font-size:13px;color:var(--ok);padding:6px 0}
+  details.cl-full{margin-top:8px}
+  details.cl-full summary{cursor:pointer;font-size:12.5px;color:var(--text-2)}
+  .cl-sub{font-size:11.5px;color:var(--text-3)}
+  .cl-key{display:inline-block;border:1px solid var(--border);border-bottom-width:2px;border-radius:4px;padding:0 5px;font-size:12px;background:var(--surface-2);line-height:1.5}
+  .cl-empty{color:var(--text-3);padding:24px;text-align:center}
+</style>
+</head>
+<body>
+
+<!-- 1. 라벨 설정 -->
+<div class="card" id="clOpts">
+  <div class="card-title"><span class="step">1</span>라벨 설정</div>
+
+  <div class="cl-sec">테이프 · 형태</div>
+  <div class="grid c4">
+    <div class="field cl-span2">
+      <label for="tape">테이프 (LW-K460 호환: 4·6·9·12·18mm)</label>
+      <select id="tape"></select>
+    </div>
+    <div class="field cl-span2">
+      <label>라벨 형태</label>
+      <div class="seg">
+        <label><input type="radio" name="form" value="flag" checked>깃발형</label>
+        <label><input type="radio" name="form" value="wrap">감싸기형</label>
+        <label><input type="radio" name="form" value="flat">일반형</label>
+      </div>
+      <div class="hint" id="formHint"></div>
+    </div>
+    <div class="field">
+      <label for="dia">케이블 지름 (mm)</label>
+      <input type="number" id="dia" value="8" min="2" max="40" step="0.5">
+      <div class="hint">서버 전원코드 보통 7~10mm</div>
+    </div>
+    <div class="field">
+      <label for="maxText" id="maxTextLabel">글씨 최대 길이 (mm)</label>
+      <input type="number" id="maxText" value="40" min="5" max="300" step="1">
+      <div class="hint" id="maxTextHint"></div>
+    </div>
+    <div class="field cl-span2">
+      <label>크기·길이</label>
+      <div class="seg">
+        <label><input type="radio" name="unify" value="all" checked>전체 통일</label>
+        <label><input type="radio" name="unify" value="each">건별 최적</label>
+      </div>
+      <div class="hint">통일: 본체 설정을 한 번만</div>
+    </div>
+  </div>
+
+  <div class="cl-sec">내용 · 글자</div>
+  <div class="grid c4">
+    <div class="field cl-span2">
+      <label>내용 배치</label>
+      <div class="seg">
+        <label><input type="radio" name="content" value="auto" checked>자동 줄맞춤</label>
+        <label><input type="radio" name="content" value="table">표 (항목명 | 값)</label>
+      </div>
+      <div class="hint" id="contentHint"></div>
+    </div>
+    <div class="field">
+      <label for="ptFix">문자 크기</label>
+      <select id="ptFix">
+        <option value="auto" selected>자동 (들어가는 가장 큰 크기)</option>
+        <option value="38">38pt</option>
+        <option value="26">26pt</option>
+        <option value="19">19pt</option>
+        <option value="13">13pt</option>
+        <option value="10">10pt</option>
+        <option value="6">6pt</option>
+      </select>
+      <div class="hint" id="ptHint"></div>
+    </div>
+    <div class="field">
+      <label>인쇄방향</label>
+      <div class="seg">
+        <label><input type="radio" name="dir" value="h" checked>가로쓰기</label>
+        <label><input type="radio" name="dir" value="v">세로쓰기</label>
+      </div>
+    </div>
+    <div class="field cl-span2">
+      <label>정렬</label>
+      <div class="seg">
+        <label><input type="radio" name="align" value="left">앞모음</label>
+        <label><input type="radio" name="align" value="center" checked>중모음</label>
+        <label><input type="radio" name="align" value="right">뒤모음</label>
+        <label><input type="radio" name="align" value="justify">균등</label>
+      </div>
+    </div>
+    <div class="field cl-span2">
+      <label>문자간격 (자간)</label>
+      <div class="seg">
+        <label><input type="radio" name="sp" value="none">없음</label>
+        <label><input type="radio" name="sp" value="narrow">좁게</label>
+        <label><input type="radio" name="sp" value="normal" checked>보통</label>
+        <label><input type="radio" name="sp" value="wide">넓게</label>
+      </div>
+    </div>
+    <div class="field">
+      <label for="sep">같은 줄 항목 구분</label>
+      <select id="sep">
+        <option value=" / " selected>/  (슬래시)</option>
+        <option value=" ">공백</option>
+        <option value=" - ">-  (하이픈)</option>
+        <option value=" | ">|  (세로선)</option>
+        <option value=" · ">·  (가운뎃점)</option>
+      </select>
+    </div>
+    <div class="field">
+      <label>글꼴 스타일</label>
+      <label class="check"><input type="checkbox" id="bold" checked>굵게</label>
+    </div>
+  </div>
+
+  <div class="cl-sec">테두리 · 표 · 여백</div>
+  <div class="grid c4">
+    <div class="field">
+      <label for="frame">테두리 (설명서 번호)</label>
+      <select id="frame"></select>
+      <div class="hint">11~75번은 그림 장식이라 미리보기 제외</div>
+    </div>
+    <div class="field">
+      <label for="table">표 (설명서 번호)</label>
+      <select id="table"></select>
+      <div class="hint">내용 배치가 ‘표’일 때</div>
+    </div>
+    <div class="field cl-span2">
+      <label>여백 (라벨 양 끝)</label>
+      <div class="seg">
+        <label><input type="radio" name="mg" value="normal" checked>보통 (약 10mm)</label>
+        <label><input type="radio" name="mg" value="min">매우적음 (약 1mm)</label>
+      </div>
+      <div class="hint" id="mgHint"></div>
+    </div>
+  </div>
+
+  <div class="cl-tapeinfo" id="tapeInfo"></div>
+  <div class="cl-note" id="optWarn"></div>
+
+  <details class="cl-adv">
+    <summary>세부 값 (기본값으로 충분)</summary>
+    <div class="grid c4">
+      <div class="field">
+        <label for="slack">깃발 감기 여유 (mm)</label>
+        <input type="number" id="slack" value="4" min="0" max="30" step="0.5">
+        <div class="hint">케이블 둘레에 더하는 길이</div>
+      </div>
+      <div class="field">
+        <label for="turns">감싸기 바퀴 수</label>
+        <input type="number" id="turns" value="1.5" min="1" max="4" step="0.25">
+      </div>
+      <div class="field">
+        <label for="minPt">이보다 작으면 경고</label>
+        <select id="minPt">
+          <option value="6">6pt</option>
+          <option value="10" selected>10pt</option>
+          <option value="13">13pt</option>
+        </select>
+      </div>
+      <div class="field">
+        <label for="hOver">인쇄 높이 직접 지정 (mm)</label>
+        <input type="number" id="hOver" placeholder="자동" min="1" max="18" step="0.1">
+        <div class="hint" id="hOverHint"></div>
+      </div>
+      <div class="field">
+        <label for="mOver">여백 실측값 (mm)</label>
+        <input type="number" id="mOver" placeholder="자동" min="0" max="30" step="0.5">
+        <div class="hint">실제로 재 보고 다르면 입력</div>
+      </div>
+      <div class="field">
+        <label for="waste">건당 버려지는 길이 (mm)</label>
+        <input type="number" id="waste" placeholder="자동" min="0" max="50" step="1">
+        <div class="hint">사용량 계산에만 · 자동: 보통 0, 매우적음 10</div>
+      </div>
+    </div>
+    <div style="margin-top:14px">
+      <div class="hint" style="margin-bottom:4px">호환 테이프 목록 (엡손 정품 라벨테이프 일람표 기준, 품번 뒤 -PX)</div>
+      <div class="cl-scroll" style="max-height:260px"><table class="cl-tapes" id="tapeList"></table></div>
+    </div>
+  </details>
+</div>
+
+<!-- 2. 케이블 목록 -->
+<div class="card" id="clList">
+  <div class="card-title"><span class="step">2</span>케이블 목록
+    <span class="spacer"></span>
+    <div class="btn-row" id="clBtns">
+      <button type="button" class="btn sm" data-act="addrow">+ 행</button>
+      <button type="button" class="btn sm" data-act="addcol">+ 열</button>
+      <button type="button" class="btn sm" data-act="sample">예시 채우기</button>
+      <button type="button" class="btn sm" data-act="clear">표 비우기</button>
+    </div>
+  </div>
+  <div class="cl-scroll" style="max-height:520px"><table class="cl-in" id="clGrid"></table></div>
+  <div class="hint">엑셀에서 복사한 범위를 칸에 그대로 붙여넣으면 행·열이 늘어납니다. 머리글까지 복사했다면 <b>머리글 칸</b>에 붙여넣으세요. · 유형 <b>자동</b>은 값 모양으로 판단(코드·숫자·IP는 줄 중간에서 쪼개지 않고, 텍스트는 단어 단위로, 경로는 →에서 줄바꿈). · 배치로 줄을 직접 고정할 수 있습니다. · <b>표</b> 배치에서는 열 이름이 1단락(항목명), 값이 2단락이 됩니다.</div>
+</div>
+
+<!-- 3. 결과 -->
+<div class="card">
+  <div class="card-title"><span class="step">3</span>출력 시뮬레이션
+    <span class="spacer"></span>
+    <div class="seg" id="clViewSeg">
+      <label><input type="radio" name="clView" value="all" checked>전체 보기</label>
+      <label><input type="radio" name="clView" value="one">한 건씩 보기</label>
+    </div>
+  </div>
+  <div class="cl-sum" id="clSum"></div>
+  <div id="clResult"></div>
+</div>
+
+<script src="../assets/menu.js"></script>
+<script src="../assets/layout.js"></script>
+<script src="cable-label.js"></script>
+</body>
+</html>
